@@ -363,3 +363,15 @@ executable(
     src_common, src_mybackrest, files('../test/src/standalone/lockMethodTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
+
+executable(
+    'standalone-ibdata-parser-test',
+    src_common, src_mybackrest, files('../test/src/standalone/ibdataParserTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+executable(
+    'standalone-toku-engine-test',
+    src_common, src_mybackrest, files('../test/src/standalone/tokuEngineTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
