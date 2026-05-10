@@ -8,7 +8,7 @@ clone, ready to drive the real implementation:
     line 75    bool have_tokudb = false                         — global presence flag
     line 458   tokudb_checkpoint_lock_var                       — variable read at handshake
     line 493   {"tokudb_checkpoint_lock", &tokudb_checkpoint_lock_var}  — added to xb_mysql_show_variables array
-    line 679   /* TokuDB plugin check via tokudb_checkpoint_lock */  — sets have_tokudb true if variable exists
+    line 679   "TokuDB plugin check via tokudb_checkpoint_lock"      — sets have_tokudb true if variable exists
 
   storage/innobase/xtrabackup/src/backup_copy.cc
     line 848   tokudb_data_file_copy_backup(filepath, thread_n) — copies per-table *.tokudb files
