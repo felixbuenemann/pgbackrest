@@ -17,10 +17,21 @@ Doublewrite buffer files under #innodb_dblwr/ are intentionally excluded — mys
 
 typedef struct TableSpaceIter TableSpaceIter;
 
-// Build the full list of tablespace files under dataPath. Excludes #innodb_dblwr/, performance_schema/, sys/, and lost+found.
+typedef struct TableSpaceIterPub
+{
+    unsigned int fileTotal;                                             // How many tablespace files were enumerated at construction
+} TableSpaceIterPub;
+
+FN_INLINE_ALWAYS unsigned int
+tableSpaceIterFileTotal(const TableSpaceIter *const this)
+{
+    return THIS_PUB(TableSpaceIter)->fileTotal;
+}
+
+// Build the full list of tablespace files under dataPath. Excludes #innodb_dblwr/, #innodb_redo/, and lost+found.
 FN_EXTERN TableSpaceIter *tableSpaceIterNew(const Storage *dataStorage, const String *dataPath);
 
-// Pop the next tablespace path (relative to dataPath); returns NULL when exhausted. Thread-safe.
+// Pop the next tablespace path (relative to dataPath); returns NULL when exhausted. Single-consumer; caller serializes access.
 FN_EXTERN String *tableSpaceIterNext(TableSpaceIter *this);
 
 FN_INLINE_ALWAYS void
@@ -28,5 +39,15 @@ tableSpaceIterFree(TableSpaceIter *const this)
 {
     objFree(this);
 }
+
+/***********************************************************************************************************************************
+Macros for function logging
+***********************************************************************************************************************************/
+FN_EXTERN void tableSpaceIterToLog(const TableSpaceIter *this, StringStatic *debugLog);
+
+#define FUNCTION_LOG_TABLE_SPACE_ITER_TYPE                                                                                         \
+    TableSpaceIter *
+#define FUNCTION_LOG_TABLE_SPACE_ITER_FORMAT(value, buffer, bufferSize)                                                            \
+    FUNCTION_LOG_OBJECT_FORMAT(value, tableSpaceIterToLog, buffer, bufferSize)
 
 #endif
