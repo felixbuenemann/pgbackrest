@@ -183,6 +183,9 @@ lib_openssl = dependency('openssl', version : '>=1.1.1')
 # Find required pq library
 lib_pq = dependency('libpq')
 
+# Find required MariaDB Connector/C library (used by myBackRest's MySQL/MariaDB/Percona client)
+lib_mariadb = dependency('libmariadb')
+
 # Find required xml library
 lib_xml = dependency('libxml-2.0')
 
