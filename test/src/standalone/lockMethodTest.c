@@ -73,6 +73,12 @@ main(void)
             c = makeFakeClient(mysqlVendorMysql, 50742);
             expect("MySQL 5.7.42 → ftwrl", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodFtwrl);
 
+            c = makeFakeClient(mysqlVendorMysql, 50651);
+            expect("MySQL 5.6.51 → ftwrl", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodFtwrl);
+
+            c = makeFakeClient(mysqlVendorMysql, 50562);
+            expect("MySQL 5.5.62 → ftwrl", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodFtwrl);
+
             c = makeFakeClient(mysqlVendorPercona, 80016);
             expect("Percona 8.0.16 → instance", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodInstance);
 

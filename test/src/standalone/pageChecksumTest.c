@@ -131,6 +131,76 @@ main(void)
         expect("checksum=none always accepts", noneResult);
 
         free(goodPage);
+
+        // ---- Tests 7+: legacy "innodb" algorithm (MySQL 5.5/5.6 default) ----
+        // Build a fresh page, compute the legacy checksum the same way the validator does, store at offset 0..3, then
+        // validate. A second pass with one byte flipped must reject.
+        unsigned char *const innodbPage = (unsigned char *)calloc(1, mysqlPageSize16K);
+
+        // Set page-no = 7 + a torn-page-safe LSN
+        innodbPage[FIL_PAGE_OFFSET + 3] = 7;
+        innodbPage[FIL_PAGE_LSN + 7] = 0x42;
+        innodbPage[mysqlPageSize16K - 1] = 0x42;                        // trailer LSN low byte must match
+
+        // Sprinkle some data
+        for (size_t i = FIL_PAGE_DATA; i < mysqlPageSize16K - 8; i++)
+            innodbPage[i] = (unsigned char)((i * 13) & 0xFF);
+
+        // Compute the legacy checksum (mirrors the algorithm in interface.c — must stay in sync)
+        const uint32_t MASK1 = 1463735687u, MASK2 = 1653893711u;
+        uint32_t fold = 0;
+        for (size_t off = FIL_PAGE_OFFSET; off + 4 <= FIL_PAGE_FILE_FLUSH_LSN; off += 4)
+        {
+            const uint32_t n2 = ((uint32_t)innodbPage[off] << 24) | ((uint32_t)innodbPage[off + 1] << 16) |
+                                ((uint32_t)innodbPage[off + 2] << 8) | (uint32_t)innodbPage[off + 3];
+            const uint32_t mix = (uint32_t)((((uint64_t)((fold ^ n2 ^ MASK2)) << 8) + fold) & 0xFFFFFFFFu);
+            fold = (mix ^ MASK1) + n2;
+        }
+        for (size_t off = FIL_PAGE_OFFSET + ((FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET) & ~(size_t)3);
+             off < FIL_PAGE_FILE_FLUSH_LSN; off++)
+        {
+            const uint32_t n2 = innodbPage[off];
+            const uint32_t mix = (uint32_t)((((uint64_t)((fold ^ n2 ^ MASK2)) << 8) + fold) & 0xFFFFFFFFu);
+            fold = (mix ^ MASK1) + n2;
+        }
+        const size_t dataEnd = mysqlPageSize16K - FIL_PAGE_TRAILER_SIZE;
+        for (size_t off = FIL_PAGE_DATA; off + 4 <= dataEnd; off += 4)
+        {
+            const uint32_t n2 = ((uint32_t)innodbPage[off] << 24) | ((uint32_t)innodbPage[off + 1] << 16) |
+                                ((uint32_t)innodbPage[off + 2] << 8) | (uint32_t)innodbPage[off + 3];
+            const uint32_t mix = (uint32_t)((((uint64_t)((fold ^ n2 ^ MASK2)) << 8) + fold) & 0xFFFFFFFFu);
+            fold = (mix ^ MASK1) + n2;
+        }
+        for (size_t off = FIL_PAGE_DATA + ((dataEnd - FIL_PAGE_DATA) & ~(size_t)3); off < dataEnd; off++)
+        {
+            const uint32_t n2 = innodbPage[off];
+            const uint32_t mix = (uint32_t)((((uint64_t)((fold ^ n2 ^ MASK2)) << 8) + fold) & 0xFFFFFFFFu);
+            fold = (mix ^ MASK1) + n2;
+        }
+
+        // Store the computed hash at page[0..3] (big-endian)
+        innodbPage[0] = (unsigned char)((fold >> 24) & 0xFF);
+        innodbPage[1] = (unsigned char)((fold >> 16) & 0xFF);
+        innodbPage[2] = (unsigned char)((fold >> 8) & 0xFF);
+        innodbPage[3] = (unsigned char)(fold & 0xFF);
+
+        const bool legacyValid = mysqlPageChecksumValidate(innodbPage, mysqlPageSize16K, mysqlPageChecksumInnodb, 7);
+        expect("MySQL 5.5/5.6 legacy 'innodb' checksum accepts valid page", legacyValid);
+
+        innodbPage[500] ^= 0xFF;
+        const bool legacyCorrupt = mysqlPageChecksumValidate(innodbPage, mysqlPageSize16K, mysqlPageChecksumInnodb, 7);
+        expect("MySQL 5.5/5.6 legacy 'innodb' checksum rejects corruption", !legacyCorrupt);
+        innodbPage[500] ^= 0xFF;
+
+        // BUF_NO_CHECKSUM_MAGIC special-case: stored=0xDEADBEEF means "no checksum, always accept"
+        innodbPage[0] = 0xDE;
+        innodbPage[1] = 0xAD;
+        innodbPage[2] = 0xBE;
+        innodbPage[3] = 0xEF;
+        const bool magicResult = mysqlPageChecksumValidate(innodbPage, mysqlPageSize16K, mysqlPageChecksumInnodb, 7);
+        expect("legacy 'innodb' BUF_NO_CHECKSUM_MAGIC always accepts", magicResult);
+
+        free(innodbPage);
     }
     CATCH_FATAL()
     {

@@ -370,11 +370,86 @@ mysqlPageChecksumValidate(
         }
 
         case mysqlPageChecksumInnodb:
-            // Legacy "innodb" mode uses a different polynomial hash (buf_calc_page_new_checksum). Defer to v1.x — modern
-            // installations don't write it (default flipped to CRC32 in MySQL 5.6.7).
-            THROW(
-                AssertError,
-                "TODO(myBackRest-C): mysqlPageChecksumInnodb (legacy hash) not implemented; require innodb_checksum_algorithm=crc32");
+        {
+            // Legacy "innodb" mode (default in MySQL 5.5 and 5.6, optional in 5.7). Algorithm is a polynomial hash from
+            // storage/innobase/include/ut0rnd.h:
+            //
+            //   UT_HASH_RANDOM_MASK  = 1463735687
+            //   UT_HASH_RANDOM_MASK2 = 1653893711
+            //
+            //   ut_fold_ulint_pair(n1, n2):
+            //       return ((((((n1 ^ n2 ^ UT_HASH_RANDOM_MASK2) << 8) + n1) & 0xFFFFFFFF) ^ UT_HASH_RANDOM_MASK) + n2
+            //
+            //   ut_fold_binary(buf, len):
+            //       fold = 0
+            //       process 4-byte chunks: fold = ut_fold_ulint_pair(fold, ut4(chunk))
+            //       leftover bytes processed individually with ut_fold_ulint_pair(fold, byte)
+            //       return fold
+            //
+            //   buf_calc_page_new_checksum(page):
+            //       hdr   = ut_fold_binary(page[FIL_PAGE_OFFSET..FIL_PAGE_FILE_FLUSH_LSN-1])      // bytes 4..25
+            //       data  = ut_fold_binary(page[FIL_PAGE_DATA..pageSize-FIL_PAGE_END_LSN_OLD_CHKSUM-1])  // 38..pageSize-9
+            //       return (hdr + data) & 0xFFFFFFFF
+            //
+            //   buf_calc_page_old_checksum(page):
+            //       return ut_fold_binary(page, FIL_PAGE_FILE_FLUSH_LSN) & 0xFFFFFFFF       // bytes 0..25
+            //
+            // Page is valid if EITHER:
+            //   stored_at_offset_0     matches buf_calc_page_new_checksum(page)
+            //   OR stored_in_trailer_4 matches buf_calc_page_old_checksum(page)
+            // Some pages were also written with stored == BUF_NO_CHECKSUM_MAGIC (0xDEADBEEF) when checksums were disabled.
+            #define UT_HASH_RANDOM_MASK   ((uint32_t)1463735687u)
+            #define UT_HASH_RANDOM_MASK2  ((uint32_t)1653893711u)
+
+            const uint32_t stored = (uint32_t)((uint32_t)page[0] << 24) |
+                                    (uint32_t)((uint32_t)page[1] << 16) |
+                                    (uint32_t)((uint32_t)page[2] << 8)  |
+                                    (uint32_t)page[3];
+
+            // BUF_NO_CHECKSUM_MAGIC marker (innodb_checksum_algorithm=none historic)
+            if (stored == 0xDEADBEEFu)
+                FUNCTION_TEST_RETURN(BOOL, true);
+
+            // ut_fold_binary inlined for the new-checksum range (bytes 4..25 + bytes 38..pageSize-9)
+            uint32_t fold = 0;
+
+            // Range 1: bytes 4..25 (22 bytes — exactly 5 4-byte chunks + 2 leftover bytes)
+            for (size_t off = FIL_PAGE_OFFSET; off + 4 <= FIL_PAGE_FILE_FLUSH_LSN; off += 4)
+            {
+                const uint32_t n2 = ((uint32_t)page[off] << 24) | ((uint32_t)page[off + 1] << 16) |
+                                    ((uint32_t)page[off + 2] << 8) | (uint32_t)page[off + 3];
+                const uint32_t mix = (uint32_t)((((uint64_t)((fold ^ n2 ^ UT_HASH_RANDOM_MASK2)) << 8) + fold) & 0xFFFFFFFFu);
+                fold = (mix ^ UT_HASH_RANDOM_MASK) + n2;
+            }
+            for (size_t off = FIL_PAGE_OFFSET + ((FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET) & ~(size_t)3);
+                 off < FIL_PAGE_FILE_FLUSH_LSN; off++)
+            {
+                const uint32_t n2 = page[off];
+                const uint32_t mix = (uint32_t)((((uint64_t)((fold ^ n2 ^ UT_HASH_RANDOM_MASK2)) << 8) + fold) & 0xFFFFFFFFu);
+                fold = (mix ^ UT_HASH_RANDOM_MASK) + n2;
+            }
+
+            // Range 2: bytes 38..pageSize-9
+            const size_t dataEnd = pageSize - FIL_PAGE_TRAILER_SIZE;
+            for (size_t off = FIL_PAGE_DATA; off + 4 <= dataEnd; off += 4)
+            {
+                const uint32_t n2 = ((uint32_t)page[off] << 24) | ((uint32_t)page[off + 1] << 16) |
+                                    ((uint32_t)page[off + 2] << 8) | (uint32_t)page[off + 3];
+                const uint32_t mix = (uint32_t)((((uint64_t)((fold ^ n2 ^ UT_HASH_RANDOM_MASK2)) << 8) + fold) & 0xFFFFFFFFu);
+                fold = (mix ^ UT_HASH_RANDOM_MASK) + n2;
+            }
+            for (size_t off = FIL_PAGE_DATA + ((dataEnd - FIL_PAGE_DATA) & ~(size_t)3); off < dataEnd; off++)
+            {
+                const uint32_t n2 = page[off];
+                const uint32_t mix = (uint32_t)((((uint64_t)((fold ^ n2 ^ UT_HASH_RANDOM_MASK2)) << 8) + fold) & 0xFFFFFFFFu);
+                fold = (mix ^ UT_HASH_RANDOM_MASK) + n2;
+            }
+
+            #undef UT_HASH_RANDOM_MASK
+            #undef UT_HASH_RANDOM_MASK2
+
+            FUNCTION_TEST_RETURN(BOOL, stored == fold);
+        }
 
         default:
             THROW_FMT(AssertError, "unknown page checksum algorithm %u", (unsigned int)algo);

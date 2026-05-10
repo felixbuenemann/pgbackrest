@@ -22,6 +22,10 @@ Auto-detection rules in mysqlLockMethodSelect:
 #include "common/log.h"
 #include "mysql/lock.h"
 
+// Version thresholds. Pre-LOCK_INSTANCE / pre-BACKUP_STAGE versions (including the entire MySQL 5.5 + 5.6 line) fall back to
+// FLUSH TABLES WITH READ LOCK, which is implemented as a single statement in mysqlLockBlockCommit.
+#define MYSQL_VERSION_MINIMUM_SUPPORTED                             50500       // MySQL 5.5.0 — InnoDB became default here
+#define MYSQL_VERSION_GTID_AVAILABLE                                50600       // GTID introduced in 5.6.0
 #define MYSQL_VERSION_LOCK_INSTANCE                                 80016
 #define MARIADB_VERSION_BACKUP_STAGE                                100400
 
