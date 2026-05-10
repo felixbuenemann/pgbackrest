@@ -249,6 +249,7 @@ src_mybackrest = [
     'mysql/engine/rocksdb.c',
     'mysql/engine/toku.c',
     'mysql/interface.c',
+    'mysql/sanity.c',
     'postgres/client.c',
     'postgres/interface.c',
     'postgres/interface/crc32.c',
