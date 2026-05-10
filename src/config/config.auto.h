@@ -54,6 +54,7 @@ Option constants
 #define CFGOPT_ARCHIVE_MODE_CHECK                                   "archive-mode-check"
 #define CFGOPT_ARCHIVE_PUSH_QUEUE_MAX                               "archive-push-queue-max"
 #define CFGOPT_ARCHIVE_TIMEOUT                                      "archive-timeout"
+#define CFGOPT_BACKUP_LOCK_METHOD                                   "backup-lock-method"
 #define CFGOPT_BACKUP_STANDBY                                       "backup-standby"
 #define CFGOPT_BETA                                                 "beta"
 #define CFGOPT_BUFFER_SIZE                                          "buffer-size"
@@ -68,9 +69,13 @@ Option constants
 #define CFGOPT_CONFIG                                               "config"
 #define CFGOPT_CONFIG_INCLUDE_PATH                                  "config-include-path"
 #define CFGOPT_CONFIG_PATH                                          "config-path"
+#define CFGOPT_DB_BINLOG_DIR                                        "db-binlog-dir"
+#define CFGOPT_DB_DEFAULTS_FILE                                     "db-defaults-file"
 #define CFGOPT_DB_EXCLUDE                                           "db-exclude"
 #define CFGOPT_DB_INCLUDE                                           "db-include"
+#define CFGOPT_DB_REDO_POLL_INTERVAL                                "db-redo-poll-interval"
 #define CFGOPT_DB_TIMEOUT                                           "db-timeout"
+#define CFGOPT_DB_VENDOR                                            "db-vendor"
 #define CFGOPT_DELTA                                                "delta"
 #define CFGOPT_DETAIL_LEVEL                                         "detail-level"
 #define CFGOPT_DRY_RUN                                              "dry-run"
@@ -118,6 +123,7 @@ Option constants
 #define CFGOPT_SCK_BLOCK                                            "sck-block"
 #define CFGOPT_SCK_KEEP_ALIVE                                       "sck-keep-alive"
 #define CFGOPT_SET                                                  "set"
+#define CFGOPT_SKIP_BINLOG_ARCHIVE                                  "skip-binlog-archive"
 #define CFGOPT_SORT                                                 "sort"
 #define CFGOPT_SPOOL_PATH                                           "spool-path"
 #define CFGOPT_STANZA                                               "stanza"
@@ -144,7 +150,7 @@ Option constants
 #define CFGOPT_VERBOSE                                              "verbose"
 #define CFGOPT_VERSION                                              "version"
 
-#define CFG_OPTION_TOTAL                                            192
+#define CFG_OPTION_TOTAL                                            198
 
 /***********************************************************************************************************************************
 Option value constants
@@ -155,6 +161,15 @@ Option value constants
 #define CFGOPTVAL_ARCHIVE_MODE_OFF                                  1
 #define CFGOPTVAL_ARCHIVE_MODE_OFF_STRID                            STRID5S("off", 1, 0x18cf4)
 #define CFGOPTVAL_ARCHIVE_MODE_OFF_Z                                "off"
+
+#define CFGOPTVAL_BACKUP_LOCK_METHOD_AUTO                           STRID5("auto", 0x7d2a10)
+#define CFGOPTVAL_BACKUP_LOCK_METHOD_AUTO_Z                         "auto"
+#define CFGOPTVAL_BACKUP_LOCK_METHOD_FTWRL                          STRID5("ftwrl", 0xc95e860)
+#define CFGOPTVAL_BACKUP_LOCK_METHOD_FTWRL_Z                        "ftwrl"
+#define CFGOPTVAL_BACKUP_LOCK_METHOD_INSTANCE                       STRID5("instance", 0x28dc1a4dc90)
+#define CFGOPTVAL_BACKUP_LOCK_METHOD_INSTANCE_Z                     "instance"
+#define CFGOPTVAL_BACKUP_LOCK_METHOD_STAGE                          STRID5("stage", 0x5386930)
+#define CFGOPTVAL_BACKUP_LOCK_METHOD_STAGE_Z                        "stage"
 
 #define CFGOPTVAL_BACKUP_STANDBY_N                                  0
 #define CFGOPTVAL_BACKUP_STANDBY_N_STRID                            STRID5S("n", 0, 0xe2)
@@ -176,6 +191,15 @@ Option value constants
 #define CFGOPTVAL_COMPRESS_TYPE_NONE_Z                              "none"
 #define CFGOPTVAL_COMPRESS_TYPE_ZST                                 STRID5("zst", 0x527a0)
 #define CFGOPTVAL_COMPRESS_TYPE_ZST_Z                               "zst"
+
+#define CFGOPTVAL_DB_VENDOR_AUTO                                    STRID5("auto", 0x7d2a10)
+#define CFGOPTVAL_DB_VENDOR_AUTO_Z                                  "auto"
+#define CFGOPTVAL_DB_VENDOR_MARIADB                                 STRID5("mariadb", 0x8814c82d0)
+#define CFGOPTVAL_DB_VENDOR_MARIADB_Z                               "mariadb"
+#define CFGOPTVAL_DB_VENDOR_MYSQL                                   STRID5("mysql", 0xc8cf2d0)
+#define CFGOPTVAL_DB_VENDOR_MYSQL_Z                                 "mysql"
+#define CFGOPTVAL_DB_VENDOR_PERCONA                                 STRID5("percona", 0x5cf1c8b00)
+#define CFGOPTVAL_DB_VENDOR_PERCONA_Z                               "percona"
 
 #define CFGOPTVAL_DETAIL_LEVEL_FULL                                 0
 #define CFGOPTVAL_DETAIL_LEVEL_FULL_STRID                           STRID5S("full", 0, 0x632a62)
@@ -488,6 +512,7 @@ typedef enum
     cfgOptArchiveModeCheck,
     cfgOptArchivePushQueueMax,
     cfgOptArchiveTimeout,
+    cfgOptBackupLockMethod,
     cfgOptBackupStandby,
     cfgOptBeta,
     cfgOptBufferSize,
@@ -502,9 +527,13 @@ typedef enum
     cfgOptConfig,
     cfgOptConfigIncludePath,
     cfgOptConfigPath,
+    cfgOptDbBinlogDir,
+    cfgOptDbDefaultsFile,
     cfgOptDbExclude,
     cfgOptDbInclude,
+    cfgOptDbRedoPollInterval,
     cfgOptDbTimeout,
+    cfgOptDbVendor,
     cfgOptDelta,
     cfgOptDetailLevel,
     cfgOptDryRun,
@@ -644,6 +673,7 @@ typedef enum
     cfgOptSckBlock,
     cfgOptSckKeepAlive,
     cfgOptSet,
+    cfgOptSkipBinlogArchive,
     cfgOptSort,
     cfgOptSpoolPath,
     cfgOptStanza,

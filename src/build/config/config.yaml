@@ -1620,6 +1620,75 @@ option:
       stanza-upgrade: {}
       verify: {}
 
+  # myBackRest MySQL/MariaDB-specific options. These are recognized by config parsing today; their consumers in src/db/db.c and
+  # src/command/backup/* will be wired up by Phase B, C, and D as those rewrites land. Adding them now establishes the
+  # configuration surface so tests + docs can reference them, and lets users start writing mybackrest.conf files.
+  #---------------------------------------------------------------------------------------------------------------------------------
+  db-vendor:
+    section: stanza
+    type: string-id
+    default: auto
+    allow-list:
+      - auto                                                            # detect at handshake via SELECT @@version_comment
+      - mysql                                                           # Oracle MySQL Community / Enterprise
+      - mariadb                                                         # MariaDB Server
+      - percona                                                         # Percona Server (MySQL-compatible)
+    command:
+      backup: {}
+      check: {}
+      stanza-create: {}
+      stanza-upgrade: {}
+
+  db-defaults-file:
+    section: stanza
+    type: path
+    required: false
+    command:
+      archive-push: {}
+      backup: {}
+      check: {}
+      restore: {}
+      stanza-create: {}
+      stanza-upgrade: {}
+
+  db-binlog-dir:
+    section: stanza
+    type: path
+    required: false
+    command:
+      archive-get: {}
+      archive-push: {}
+      backup: {}
+      restore: {}
+
+  backup-lock-method:
+    section: stanza
+    type: string-id
+    default: auto
+    allow-list:
+      - auto                                                            # pick the highest-precedence supported by the server
+      - instance                                                        # MySQL 8.0.16+: LOCK INSTANCE FOR BACKUP
+      - stage                                                           # MariaDB 10.4+:  BACKUP STAGE state machine
+      - ftwrl                                                           # legacy: FLUSH TABLES WITH READ LOCK (5.7 + Percona <8.0.16)
+    command:
+      backup: {}
+
+  skip-binlog-archive:
+    section: stanza
+    type: boolean
+    default: false
+    command:
+      backup: {}
+      stanza-create: {}
+
+  db-redo-poll-interval:
+    section: stanza
+    type: time
+    default: 100ms
+    allow-range: [10ms, 60s]
+    command:
+      backup: {}
+
   # Repository common options
   #---------------------------------------------------------------------------------------------------------------------------------
   repo:

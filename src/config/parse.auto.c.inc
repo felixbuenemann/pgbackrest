@@ -26,6 +26,7 @@ static const StringPubConst parseRuleValueStr[] =
     PARSE_RULE_STRPUB("1"),                                                                                               // val/str
     PARSE_RULE_STRPUB("100ms"),                                                                                           // val/str
     PARSE_RULE_STRPUB("1024"),                                                                                            // val/str
+    PARSE_RULE_STRPUB("10ms"),                                                                                            // val/str
     PARSE_RULE_STRPUB("12"),                                                                                              // val/str
     PARSE_RULE_STRPUB("128KiB"),                                                                                          // val/str
     PARSE_RULE_STRPUB("128MiB"),                                                                                          // val/str
@@ -62,6 +63,7 @@ static const StringPubConst parseRuleValueStr[] =
     PARSE_RULE_STRPUB("5432"),                                                                                            // val/str
     PARSE_RULE_STRPUB("5MiB"),                                                                                            // val/str
     PARSE_RULE_STRPUB("6"),                                                                                               // val/str
+    PARSE_RULE_STRPUB("60s"),                                                                                             // val/str
     PARSE_RULE_STRPUB("64KiB"),                                                                                           // val/str
     PARSE_RULE_STRPUB("65535"),                                                                                           // val/str
     PARSE_RULE_STRPUB("7d"),                                                                                              // val/str
@@ -88,6 +90,7 @@ static const StringPubConst parseRuleValueStr[] =
     PARSE_RULE_STRPUB("diff"),                                                                                            // val/str
     PARSE_RULE_STRPUB("error"),                                                                                           // val/str
     PARSE_RULE_STRPUB("fingerprint"),                                                                                     // val/str
+    PARSE_RULE_STRPUB("ftwrl"),                                                                                           // val/str
     PARSE_RULE_STRPUB("full"),                                                                                            // val/str
     PARSE_RULE_STRPUB("gcs"),                                                                                             // val/str
     PARSE_RULE_STRPUB("gz"),                                                                                              // val/str
@@ -95,12 +98,15 @@ static const StringPubConst parseRuleValueStr[] =
     PARSE_RULE_STRPUB("immediate"),                                                                                       // val/str
     PARSE_RULE_STRPUB("incr"),                                                                                            // val/str
     PARSE_RULE_STRPUB("info"),                                                                                            // val/str
+    PARSE_RULE_STRPUB("instance"),                                                                                        // val/str
     PARSE_RULE_STRPUB("json"),                                                                                            // val/str
     PARSE_RULE_STRPUB("latest"),                                                                                          // val/str
     PARSE_RULE_STRPUB("localhost"),                                                                                       // val/str
     PARSE_RULE_STRPUB("lsn"),                                                                                             // val/str
     PARSE_RULE_STRPUB("lz4"),                                                                                             // val/str
+    PARSE_RULE_STRPUB("mariadb"),                                                                                         // val/str
     PARSE_RULE_STRPUB("md5"),                                                                                             // val/str
+    PARSE_RULE_STRPUB("mysql"),                                                                                           // val/str
     PARSE_RULE_STRPUB("n"),                                                                                               // val/str
     PARSE_RULE_STRPUB("name"),                                                                                            // val/str
     PARSE_RULE_STRPUB("none"),                                                                                            // val/str
@@ -108,6 +114,7 @@ static const StringPubConst parseRuleValueStr[] =
     PARSE_RULE_STRPUB("off"),                                                                                             // val/str
     PARSE_RULE_STRPUB("path"),                                                                                            // val/str
     PARSE_RULE_STRPUB("pause"),                                                                                           // val/str
+    PARSE_RULE_STRPUB("percona"),                                                                                         // val/str
     PARSE_RULE_STRPUB("pg"),                                                                                              // val/str
     PARSE_RULE_STRPUB("pgbackrest"),                                                                                      // val/str
     PARSE_RULE_STRPUB("pod-id"),                                                                                          // val/str
@@ -127,6 +134,7 @@ static const StringPubConst parseRuleValueStr[] =
     PARSE_RULE_STRPUB("shared"),                                                                                          // val/str
     PARSE_RULE_STRPUB("shutdown"),                                                                                        // val/str
     PARSE_RULE_STRPUB("ssh"),                                                                                             // val/str
+    PARSE_RULE_STRPUB("stage"),                                                                                           // val/str
     PARSE_RULE_STRPUB("standby"),                                                                                         // val/str
     PARSE_RULE_STRPUB("storage.googleapis.com"),                                                                          // val/str
     PARSE_RULE_STRPUB("strict"),                                                                                          // val/str
@@ -161,6 +169,7 @@ typedef enum
     parseRuleValStrQT_1_QT,                                                                                          // val/str/enum
     parseRuleValStrQT_100ms_QT,                                                                                      // val/str/enum
     parseRuleValStrQT_1024_QT,                                                                                       // val/str/enum
+    parseRuleValStrQT_10ms_QT,                                                                                       // val/str/enum
     parseRuleValStrQT_12_QT,                                                                                         // val/str/enum
     parseRuleValStrQT_128KiB_QT,                                                                                     // val/str/enum
     parseRuleValStrQT_128MiB_QT,                                                                                     // val/str/enum
@@ -197,6 +206,7 @@ typedef enum
     parseRuleValStrQT_5432_QT,                                                                                       // val/str/enum
     parseRuleValStrQT_5MiB_QT,                                                                                       // val/str/enum
     parseRuleValStrQT_6_QT,                                                                                          // val/str/enum
+    parseRuleValStrQT_60s_QT,                                                                                        // val/str/enum
     parseRuleValStrQT_64KiB_QT,                                                                                      // val/str/enum
     parseRuleValStrQT_65535_QT,                                                                                      // val/str/enum
     parseRuleValStrQT_7d_QT,                                                                                         // val/str/enum
@@ -223,6 +233,7 @@ typedef enum
     parseRuleValStrQT_diff_QT,                                                                                       // val/str/enum
     parseRuleValStrQT_error_QT,                                                                                      // val/str/enum
     parseRuleValStrQT_fingerprint_QT,                                                                                // val/str/enum
+    parseRuleValStrQT_ftwrl_QT,                                                                                      // val/str/enum
     parseRuleValStrQT_full_QT,                                                                                       // val/str/enum
     parseRuleValStrQT_gcs_QT,                                                                                        // val/str/enum
     parseRuleValStrQT_gz_QT,                                                                                         // val/str/enum
@@ -230,12 +241,15 @@ typedef enum
     parseRuleValStrQT_immediate_QT,                                                                                  // val/str/enum
     parseRuleValStrQT_incr_QT,                                                                                       // val/str/enum
     parseRuleValStrQT_info_QT,                                                                                       // val/str/enum
+    parseRuleValStrQT_instance_QT,                                                                                   // val/str/enum
     parseRuleValStrQT_json_QT,                                                                                       // val/str/enum
     parseRuleValStrQT_latest_QT,                                                                                     // val/str/enum
     parseRuleValStrQT_localhost_QT,                                                                                  // val/str/enum
     parseRuleValStrQT_lsn_QT,                                                                                        // val/str/enum
     parseRuleValStrQT_lz4_QT,                                                                                        // val/str/enum
+    parseRuleValStrQT_mariadb_QT,                                                                                    // val/str/enum
     parseRuleValStrQT_md5_QT,                                                                                        // val/str/enum
+    parseRuleValStrQT_mysql_QT,                                                                                      // val/str/enum
     parseRuleValStrQT_n_QT,                                                                                          // val/str/enum
     parseRuleValStrQT_name_QT,                                                                                       // val/str/enum
     parseRuleValStrQT_none_QT,                                                                                       // val/str/enum
@@ -243,6 +257,7 @@ typedef enum
     parseRuleValStrQT_off_QT,                                                                                        // val/str/enum
     parseRuleValStrQT_path_QT,                                                                                       // val/str/enum
     parseRuleValStrQT_pause_QT,                                                                                      // val/str/enum
+    parseRuleValStrQT_percona_QT,                                                                                    // val/str/enum
     parseRuleValStrQT_pg_QT,                                                                                         // val/str/enum
     parseRuleValStrQT_pgbackrest_QT,                                                                                 // val/str/enum
     parseRuleValStrQT_pod_DS_id_QT,                                                                                  // val/str/enum
@@ -262,6 +277,7 @@ typedef enum
     parseRuleValStrQT_shared_QT,                                                                                     // val/str/enum
     parseRuleValStrQT_shutdown_QT,                                                                                   // val/str/enum
     parseRuleValStrQT_ssh_QT,                                                                                        // val/str/enum
+    parseRuleValStrQT_stage_QT,                                                                                      // val/str/enum
     parseRuleValStrQT_standby_QT,                                                                                    // val/str/enum
     parseRuleValStrQT_storage_DT_googleapis_DT_com_QT,                                                               // val/str/enum
     parseRuleValStrQT_strict_QT,                                                                                     // val/str/enum
@@ -460,8 +476,10 @@ Rule Times
 static const unsigned int parseRuleValueTime[] =
 {
     0,                                                                                                                   // val/time
+    10,                                                                                                                  // val/time
     100,                                                                                                                 // val/time
     15000,                                                                                                               // val/time
+    60000,                                                                                                               // val/time
     60000,                                                                                                               // val/time
     900000,                                                                                                              // val/time
     1800000,                                                                                                             // val/time
@@ -474,9 +492,11 @@ static const unsigned int parseRuleValueTime[] =
 static const uint8_t parseRuleValueTimeStrMap[] =
 {
     parseRuleValStrQT_0s_QT,                                                                                      // val/time/strmap
+    parseRuleValStrQT_10ms_QT,                                                                                    // val/time/strmap
     parseRuleValStrQT_100ms_QT,                                                                                   // val/time/strmap
     parseRuleValStrQT_15s_QT,                                                                                     // val/time/strmap
     parseRuleValStrQT_1m_QT,                                                                                      // val/time/strmap
+    parseRuleValStrQT_60s_QT,                                                                                     // val/time/strmap
     parseRuleValStrQT_15m_QT,                                                                                     // val/time/strmap
     parseRuleValStrQT_30m_QT,                                                                                     // val/time/strmap
     parseRuleValStrQT_31m_QT,                                                                                     // val/time/strmap
@@ -488,9 +508,11 @@ static const uint8_t parseRuleValueTimeStrMap[] =
 typedef enum
 {
     parseRuleValTime0s,                                                                                             // val/time/enum
+    parseRuleValTime10ms,                                                                                           // val/time/enum
     parseRuleValTime100ms,                                                                                          // val/time/enum
     parseRuleValTime15s,                                                                                            // val/time/enum
     parseRuleValTime1m,                                                                                             // val/time/enum
+    parseRuleValTime60s,                                                                                            // val/time/enum
     parseRuleValTime15m,                                                                                            // val/time/enum
     parseRuleValTime30m,                                                                                            // val/time/enum
     parseRuleValTime31m,                                                                                            // val/time/enum
@@ -1277,6 +1299,49 @@ static const ParseRuleOption parseRuleOption[CFG_OPTION_TOTAL] =
             ),                                                                                                // opt/archive-timeout
         ),                                                                                                    // opt/archive-timeout
     ),                                                                                                        // opt/archive-timeout
+    // -----------------------------------------------------------------------------------------------------------------------------
+    PARSE_RULE_OPTION                                                                                      // opt/backup-lock-method
+    (                                                                                                      // opt/backup-lock-method
+        PARSE_RULE_OPTION_NAME("backup-lock-method"),                                                      // opt/backup-lock-method
+        PARSE_RULE_OPTION_TYPE(StringId),                                                                  // opt/backup-lock-method
+        PARSE_RULE_OPTION_RESET(true),                                                                     // opt/backup-lock-method
+        PARSE_RULE_OPTION_REQUIRED(true),                                                                  // opt/backup-lock-method
+        PARSE_RULE_OPTION_SECTION(Stanza),                                                                 // opt/backup-lock-method
+                                                                                                           // opt/backup-lock-method
+        PARSE_RULE_OPTION_COMMAND_ROLE_MAIN_VALID_LIST                                                     // opt/backup-lock-method
+        (                                                                                                  // opt/backup-lock-method
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                              // opt/backup-lock-method
+        ),                                                                                                 // opt/backup-lock-method
+                                                                                                           // opt/backup-lock-method
+        PARSE_RULE_OPTION_COMMAND_ROLE_LOCAL_VALID_LIST                                                    // opt/backup-lock-method
+        (                                                                                                  // opt/backup-lock-method
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                              // opt/backup-lock-method
+        ),                                                                                                 // opt/backup-lock-method
+                                                                                                           // opt/backup-lock-method
+        PARSE_RULE_OPTION_COMMAND_ROLE_REMOTE_VALID_LIST                                                   // opt/backup-lock-method
+        (                                                                                                  // opt/backup-lock-method
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                              // opt/backup-lock-method
+        ),                                                                                                 // opt/backup-lock-method
+                                                                                                           // opt/backup-lock-method
+        PARSE_RULE_OPTIONAL                                                                                // opt/backup-lock-method
+        (                                                                                                  // opt/backup-lock-method
+            PARSE_RULE_OPTIONAL_GROUP                                                                      // opt/backup-lock-method
+            (                                                                                              // opt/backup-lock-method
+                PARSE_RULE_OPTIONAL_ALLOW_LIST                                                             // opt/backup-lock-method
+                (                                                                                          // opt/backup-lock-method
+                    PARSE_RULE_VAL_STRID(auto),                                                            // opt/backup-lock-method
+                    PARSE_RULE_VAL_STRID(instance),                                                        // opt/backup-lock-method
+                    PARSE_RULE_VAL_STRID(stage),                                                           // opt/backup-lock-method
+                    PARSE_RULE_VAL_STRID(ftwrl),                                                           // opt/backup-lock-method
+                ),                                                                                         // opt/backup-lock-method
+                                                                                                           // opt/backup-lock-method
+                PARSE_RULE_OPTIONAL_DEFAULT                                                                // opt/backup-lock-method
+                (                                                                                          // opt/backup-lock-method
+                    PARSE_RULE_VAL_STRID(auto),                                                            // opt/backup-lock-method
+                ),                                                                                         // opt/backup-lock-method
+            ),                                                                                             // opt/backup-lock-method
+        ),                                                                                                 // opt/backup-lock-method
+    ),                                                                                                     // opt/backup-lock-method
     // -----------------------------------------------------------------------------------------------------------------------------
     PARSE_RULE_OPTION                                                                                          // opt/backup-standby
     (                                                                                                          // opt/backup-standby
@@ -2066,6 +2131,86 @@ static const ParseRuleOption parseRuleOption[CFG_OPTION_TOTAL] =
         ),                                                                                                        // opt/config-path
     ),                                                                                                            // opt/config-path
     // -----------------------------------------------------------------------------------------------------------------------------
+    PARSE_RULE_OPTION                                                                                           // opt/db-binlog-dir
+    (                                                                                                           // opt/db-binlog-dir
+        PARSE_RULE_OPTION_NAME("db-binlog-dir"),                                                                // opt/db-binlog-dir
+        PARSE_RULE_OPTION_TYPE(Path),                                                                           // opt/db-binlog-dir
+        PARSE_RULE_OPTION_RESET(true),                                                                          // opt/db-binlog-dir
+        PARSE_RULE_OPTION_REQUIRED(false),                                                                      // opt/db-binlog-dir
+        PARSE_RULE_OPTION_SECTION(Stanza),                                                                      // opt/db-binlog-dir
+                                                                                                                // opt/db-binlog-dir
+        PARSE_RULE_OPTION_COMMAND_ROLE_MAIN_VALID_LIST                                                          // opt/db-binlog-dir
+        (                                                                                                       // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(ArchiveGet)                                                               // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(ArchivePush)                                                              // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                                   // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(Restore)                                                                  // opt/db-binlog-dir
+        ),                                                                                                      // opt/db-binlog-dir
+                                                                                                                // opt/db-binlog-dir
+        PARSE_RULE_OPTION_COMMAND_ROLE_ASYNC_VALID_LIST                                                         // opt/db-binlog-dir
+        (                                                                                                       // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(ArchiveGet)                                                               // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(ArchivePush)                                                              // opt/db-binlog-dir
+        ),                                                                                                      // opt/db-binlog-dir
+                                                                                                                // opt/db-binlog-dir
+        PARSE_RULE_OPTION_COMMAND_ROLE_LOCAL_VALID_LIST                                                         // opt/db-binlog-dir
+        (                                                                                                       // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(ArchiveGet)                                                               // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(ArchivePush)                                                              // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                                   // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(Restore)                                                                  // opt/db-binlog-dir
+        ),                                                                                                      // opt/db-binlog-dir
+                                                                                                                // opt/db-binlog-dir
+        PARSE_RULE_OPTION_COMMAND_ROLE_REMOTE_VALID_LIST                                                        // opt/db-binlog-dir
+        (                                                                                                       // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(ArchiveGet)                                                               // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(ArchivePush)                                                              // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                                   // opt/db-binlog-dir
+            PARSE_RULE_OPTION_COMMAND(Restore)                                                                  // opt/db-binlog-dir
+        ),                                                                                                      // opt/db-binlog-dir
+    ),                                                                                                          // opt/db-binlog-dir
+    // -----------------------------------------------------------------------------------------------------------------------------
+    PARSE_RULE_OPTION                                                                                        // opt/db-defaults-file
+    (                                                                                                        // opt/db-defaults-file
+        PARSE_RULE_OPTION_NAME("db-defaults-file"),                                                          // opt/db-defaults-file
+        PARSE_RULE_OPTION_TYPE(Path),                                                                        // opt/db-defaults-file
+        PARSE_RULE_OPTION_RESET(true),                                                                       // opt/db-defaults-file
+        PARSE_RULE_OPTION_REQUIRED(false),                                                                   // opt/db-defaults-file
+        PARSE_RULE_OPTION_SECTION(Stanza),                                                                   // opt/db-defaults-file
+                                                                                                             // opt/db-defaults-file
+        PARSE_RULE_OPTION_COMMAND_ROLE_MAIN_VALID_LIST                                                       // opt/db-defaults-file
+        (                                                                                                    // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(ArchivePush)                                                           // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                                // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(Check)                                                                 // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(Restore)                                                               // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(StanzaCreate)                                                          // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(StanzaUpgrade)                                                         // opt/db-defaults-file
+        ),                                                                                                   // opt/db-defaults-file
+                                                                                                             // opt/db-defaults-file
+        PARSE_RULE_OPTION_COMMAND_ROLE_ASYNC_VALID_LIST                                                      // opt/db-defaults-file
+        (                                                                                                    // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(ArchivePush)                                                           // opt/db-defaults-file
+        ),                                                                                                   // opt/db-defaults-file
+                                                                                                             // opt/db-defaults-file
+        PARSE_RULE_OPTION_COMMAND_ROLE_LOCAL_VALID_LIST                                                      // opt/db-defaults-file
+        (                                                                                                    // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(ArchivePush)                                                           // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                                // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(Restore)                                                               // opt/db-defaults-file
+        ),                                                                                                   // opt/db-defaults-file
+                                                                                                             // opt/db-defaults-file
+        PARSE_RULE_OPTION_COMMAND_ROLE_REMOTE_VALID_LIST                                                     // opt/db-defaults-file
+        (                                                                                                    // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(ArchivePush)                                                           // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                                // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(Check)                                                                 // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(Restore)                                                               // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(StanzaCreate)                                                          // opt/db-defaults-file
+            PARSE_RULE_OPTION_COMMAND(StanzaUpgrade)                                                         // opt/db-defaults-file
+        ),                                                                                                   // opt/db-defaults-file
+    ),                                                                                                       // opt/db-defaults-file
+    // -----------------------------------------------------------------------------------------------------------------------------
     PARSE_RULE_OPTION                                                                                              // opt/db-exclude
     (                                                                                                              // opt/db-exclude
         PARSE_RULE_OPTION_NAME("db-exclude"),                                                                      // opt/db-exclude
@@ -2095,6 +2240,47 @@ static const ParseRuleOption parseRuleOption[CFG_OPTION_TOTAL] =
             PARSE_RULE_OPTION_COMMAND(Restore)                                                                     // opt/db-include
         ),                                                                                                         // opt/db-include
     ),                                                                                                             // opt/db-include
+    // -----------------------------------------------------------------------------------------------------------------------------
+    PARSE_RULE_OPTION                                                                                   // opt/db-redo-poll-interval
+    (                                                                                                   // opt/db-redo-poll-interval
+        PARSE_RULE_OPTION_NAME("db-redo-poll-interval"),                                                // opt/db-redo-poll-interval
+        PARSE_RULE_OPTION_TYPE(Time),                                                                   // opt/db-redo-poll-interval
+        PARSE_RULE_OPTION_RESET(true),                                                                  // opt/db-redo-poll-interval
+        PARSE_RULE_OPTION_REQUIRED(true),                                                               // opt/db-redo-poll-interval
+        PARSE_RULE_OPTION_SECTION(Stanza),                                                              // opt/db-redo-poll-interval
+                                                                                                        // opt/db-redo-poll-interval
+        PARSE_RULE_OPTION_COMMAND_ROLE_MAIN_VALID_LIST                                                  // opt/db-redo-poll-interval
+        (                                                                                               // opt/db-redo-poll-interval
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                           // opt/db-redo-poll-interval
+        ),                                                                                              // opt/db-redo-poll-interval
+                                                                                                        // opt/db-redo-poll-interval
+        PARSE_RULE_OPTION_COMMAND_ROLE_LOCAL_VALID_LIST                                                 // opt/db-redo-poll-interval
+        (                                                                                               // opt/db-redo-poll-interval
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                           // opt/db-redo-poll-interval
+        ),                                                                                              // opt/db-redo-poll-interval
+                                                                                                        // opt/db-redo-poll-interval
+        PARSE_RULE_OPTION_COMMAND_ROLE_REMOTE_VALID_LIST                                                // opt/db-redo-poll-interval
+        (                                                                                               // opt/db-redo-poll-interval
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                           // opt/db-redo-poll-interval
+        ),                                                                                              // opt/db-redo-poll-interval
+                                                                                                        // opt/db-redo-poll-interval
+        PARSE_RULE_OPTIONAL                                                                             // opt/db-redo-poll-interval
+        (                                                                                               // opt/db-redo-poll-interval
+            PARSE_RULE_OPTIONAL_GROUP                                                                   // opt/db-redo-poll-interval
+            (                                                                                           // opt/db-redo-poll-interval
+                PARSE_RULE_OPTIONAL_ALLOW_RANGE                                                         // opt/db-redo-poll-interval
+                (                                                                                       // opt/db-redo-poll-interval
+                    PARSE_RULE_VAL_TIME(10ms),                                                          // opt/db-redo-poll-interval
+                    PARSE_RULE_VAL_TIME(60s),                                                           // opt/db-redo-poll-interval
+                ),                                                                                      // opt/db-redo-poll-interval
+                                                                                                        // opt/db-redo-poll-interval
+                PARSE_RULE_OPTIONAL_DEFAULT                                                             // opt/db-redo-poll-interval
+                (                                                                                       // opt/db-redo-poll-interval
+                    PARSE_RULE_VAL_TIME(100ms),                                                         // opt/db-redo-poll-interval
+                ),                                                                                      // opt/db-redo-poll-interval
+            ),                                                                                          // opt/db-redo-poll-interval
+        ),                                                                                              // opt/db-redo-poll-interval
+    ),                                                                                                  // opt/db-redo-poll-interval
     // -----------------------------------------------------------------------------------------------------------------------------
     PARSE_RULE_OPTION                                                                                              // opt/db-timeout
     (                                                                                                              // opt/db-timeout
@@ -2144,6 +2330,55 @@ static const ParseRuleOption parseRuleOption[CFG_OPTION_TOTAL] =
             ),                                                                                                     // opt/db-timeout
         ),                                                                                                         // opt/db-timeout
     ),                                                                                                             // opt/db-timeout
+    // -----------------------------------------------------------------------------------------------------------------------------
+    PARSE_RULE_OPTION                                                                                               // opt/db-vendor
+    (                                                                                                               // opt/db-vendor
+        PARSE_RULE_OPTION_NAME("db-vendor"),                                                                        // opt/db-vendor
+        PARSE_RULE_OPTION_TYPE(StringId),                                                                           // opt/db-vendor
+        PARSE_RULE_OPTION_RESET(true),                                                                              // opt/db-vendor
+        PARSE_RULE_OPTION_REQUIRED(true),                                                                           // opt/db-vendor
+        PARSE_RULE_OPTION_SECTION(Stanza),                                                                          // opt/db-vendor
+                                                                                                                    // opt/db-vendor
+        PARSE_RULE_OPTION_COMMAND_ROLE_MAIN_VALID_LIST                                                              // opt/db-vendor
+        (                                                                                                           // opt/db-vendor
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                                       // opt/db-vendor
+            PARSE_RULE_OPTION_COMMAND(Check)                                                                        // opt/db-vendor
+            PARSE_RULE_OPTION_COMMAND(StanzaCreate)                                                                 // opt/db-vendor
+            PARSE_RULE_OPTION_COMMAND(StanzaUpgrade)                                                                // opt/db-vendor
+        ),                                                                                                          // opt/db-vendor
+                                                                                                                    // opt/db-vendor
+        PARSE_RULE_OPTION_COMMAND_ROLE_LOCAL_VALID_LIST                                                             // opt/db-vendor
+        (                                                                                                           // opt/db-vendor
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                                       // opt/db-vendor
+        ),                                                                                                          // opt/db-vendor
+                                                                                                                    // opt/db-vendor
+        PARSE_RULE_OPTION_COMMAND_ROLE_REMOTE_VALID_LIST                                                            // opt/db-vendor
+        (                                                                                                           // opt/db-vendor
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                                       // opt/db-vendor
+            PARSE_RULE_OPTION_COMMAND(Check)                                                                        // opt/db-vendor
+            PARSE_RULE_OPTION_COMMAND(StanzaCreate)                                                                 // opt/db-vendor
+            PARSE_RULE_OPTION_COMMAND(StanzaUpgrade)                                                                // opt/db-vendor
+        ),                                                                                                          // opt/db-vendor
+                                                                                                                    // opt/db-vendor
+        PARSE_RULE_OPTIONAL                                                                                         // opt/db-vendor
+        (                                                                                                           // opt/db-vendor
+            PARSE_RULE_OPTIONAL_GROUP                                                                               // opt/db-vendor
+            (                                                                                                       // opt/db-vendor
+                PARSE_RULE_OPTIONAL_ALLOW_LIST                                                                      // opt/db-vendor
+                (                                                                                                   // opt/db-vendor
+                    PARSE_RULE_VAL_STRID(auto),                                                                     // opt/db-vendor
+                    PARSE_RULE_VAL_STRID(mysql),                                                                    // opt/db-vendor
+                    PARSE_RULE_VAL_STRID(mariadb),                                                                  // opt/db-vendor
+                    PARSE_RULE_VAL_STRID(percona),                                                                  // opt/db-vendor
+                ),                                                                                                  // opt/db-vendor
+                                                                                                                    // opt/db-vendor
+                PARSE_RULE_OPTIONAL_DEFAULT                                                                         // opt/db-vendor
+                (                                                                                                   // opt/db-vendor
+                    PARSE_RULE_VAL_STRID(auto),                                                                     // opt/db-vendor
+                ),                                                                                                  // opt/db-vendor
+            ),                                                                                                      // opt/db-vendor
+        ),                                                                                                          // opt/db-vendor
+    ),                                                                                                              // opt/db-vendor
     // -----------------------------------------------------------------------------------------------------------------------------
     PARSE_RULE_OPTION                                                                                                   // opt/delta
     (                                                                                                                   // opt/delta
@@ -10303,6 +10538,44 @@ static const ParseRuleOption parseRuleOption[CFG_OPTION_TOTAL] =
         ),                                                                                                                // opt/set
     ),                                                                                                                    // opt/set
     // -----------------------------------------------------------------------------------------------------------------------------
+    PARSE_RULE_OPTION                                                                                     // opt/skip-binlog-archive
+    (                                                                                                     // opt/skip-binlog-archive
+        PARSE_RULE_OPTION_NAME("skip-binlog-archive"),                                                    // opt/skip-binlog-archive
+        PARSE_RULE_OPTION_TYPE(Boolean),                                                                  // opt/skip-binlog-archive
+        PARSE_RULE_OPTION_NEGATE(true),                                                                   // opt/skip-binlog-archive
+        PARSE_RULE_OPTION_RESET(true),                                                                    // opt/skip-binlog-archive
+        PARSE_RULE_OPTION_REQUIRED(true),                                                                 // opt/skip-binlog-archive
+        PARSE_RULE_OPTION_SECTION(Stanza),                                                                // opt/skip-binlog-archive
+                                                                                                          // opt/skip-binlog-archive
+        PARSE_RULE_OPTION_COMMAND_ROLE_MAIN_VALID_LIST                                                    // opt/skip-binlog-archive
+        (                                                                                                 // opt/skip-binlog-archive
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                             // opt/skip-binlog-archive
+            PARSE_RULE_OPTION_COMMAND(StanzaCreate)                                                       // opt/skip-binlog-archive
+        ),                                                                                                // opt/skip-binlog-archive
+                                                                                                          // opt/skip-binlog-archive
+        PARSE_RULE_OPTION_COMMAND_ROLE_LOCAL_VALID_LIST                                                   // opt/skip-binlog-archive
+        (                                                                                                 // opt/skip-binlog-archive
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                             // opt/skip-binlog-archive
+        ),                                                                                                // opt/skip-binlog-archive
+                                                                                                          // opt/skip-binlog-archive
+        PARSE_RULE_OPTION_COMMAND_ROLE_REMOTE_VALID_LIST                                                  // opt/skip-binlog-archive
+        (                                                                                                 // opt/skip-binlog-archive
+            PARSE_RULE_OPTION_COMMAND(Backup)                                                             // opt/skip-binlog-archive
+            PARSE_RULE_OPTION_COMMAND(StanzaCreate)                                                       // opt/skip-binlog-archive
+        ),                                                                                                // opt/skip-binlog-archive
+                                                                                                          // opt/skip-binlog-archive
+        PARSE_RULE_OPTIONAL                                                                               // opt/skip-binlog-archive
+        (                                                                                                 // opt/skip-binlog-archive
+            PARSE_RULE_OPTIONAL_GROUP                                                                     // opt/skip-binlog-archive
+            (                                                                                             // opt/skip-binlog-archive
+                PARSE_RULE_OPTIONAL_DEFAULT                                                               // opt/skip-binlog-archive
+                (                                                                                         // opt/skip-binlog-archive
+                    PARSE_RULE_VAL_BOOL_FALSE,                                                            // opt/skip-binlog-archive
+                ),                                                                                        // opt/skip-binlog-archive
+            ),                                                                                            // opt/skip-binlog-archive
+        ),                                                                                                // opt/skip-binlog-archive
+    ),                                                                                                    // opt/skip-binlog-archive
+    // -----------------------------------------------------------------------------------------------------------------------------
     PARSE_RULE_OPTION                                                                                                    // opt/sort
     (                                                                                                                    // opt/sort
         PARSE_RULE_OPTION_NAME("sort"),                                                                                  // opt/sort
@@ -11610,6 +11883,7 @@ static const uint8_t optionResolveOrder[] =
     cfgOptArchiveMode,                                                                                          // opt-resolve-order
     cfgOptArchivePushQueueMax,                                                                                  // opt-resolve-order
     cfgOptArchiveTimeout,                                                                                       // opt-resolve-order
+    cfgOptBackupLockMethod,                                                                                     // opt-resolve-order
     cfgOptBackupStandby,                                                                                        // opt-resolve-order
     cfgOptBeta,                                                                                                 // opt-resolve-order
     cfgOptBufferSize,                                                                                           // opt-resolve-order
@@ -11623,9 +11897,13 @@ static const uint8_t optionResolveOrder[] =
     cfgOptConfig,                                                                                               // opt-resolve-order
     cfgOptConfigIncludePath,                                                                                    // opt-resolve-order
     cfgOptConfigPath,                                                                                           // opt-resolve-order
+    cfgOptDbBinlogDir,                                                                                          // opt-resolve-order
+    cfgOptDbDefaultsFile,                                                                                       // opt-resolve-order
     cfgOptDbExclude,                                                                                            // opt-resolve-order
     cfgOptDbInclude,                                                                                            // opt-resolve-order
+    cfgOptDbRedoPollInterval,                                                                                   // opt-resolve-order
     cfgOptDbTimeout,                                                                                            // opt-resolve-order
+    cfgOptDbVendor,                                                                                             // opt-resolve-order
     cfgOptDelta,                                                                                                // opt-resolve-order
     cfgOptDetailLevel,                                                                                          // opt-resolve-order
     cfgOptDryRun,                                                                                               // opt-resolve-order
@@ -11691,6 +11969,7 @@ static const uint8_t optionResolveOrder[] =
     cfgOptSckBlock,                                                                                             // opt-resolve-order
     cfgOptSckKeepAlive,                                                                                         // opt-resolve-order
     cfgOptSet,                                                                                                  // opt-resolve-order
+    cfgOptSkipBinlogArchive,                                                                                    // opt-resolve-order
     cfgOptSort,                                                                                                 // opt-resolve-order
     cfgOptSpoolPath,                                                                                            // opt-resolve-order
     cfgOptStartFast,                                                                                            // opt-resolve-order

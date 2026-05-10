@@ -507,6 +507,66 @@
 
                         <example>15</example>
                     </config-key>
+
+                    <config-key id="db-vendor" name="Database Vendor">
+                        <summary>MySQL/MariaDB/Percona vendor flavor.</summary>
+
+                        <text>
+                            <p>Selects the database flavor when myBackRest cannot autodetect it from the server's <code>@@version_comment</code> reply. Use <setting>auto</setting> in normal operation; the explicit values are only needed when the server reports an ambiguous identification string (for example, a custom-build Percona Server that omits the standard suffix).</p>
+                        </text>
+
+                        <example>mariadb</example>
+                    </config-key>
+
+                    <config-key id="db-defaults-file" name="Database Defaults File">
+                        <summary>Path to my.cnf for credentials and connection defaults.</summary>
+
+                        <text>
+                            <p>Standard MySQL/MariaDB defaults file (typically <file>/etc/my.cnf</file> or <file>~/.my.cnf</file>). myBackRest reads connection defaults (host, port, user, password) from the <setting>[client]</setting> and <setting>[mybackrest]</setting> sections.</p>
+                        </text>
+
+                        <example>/etc/my.cnf</example>
+                    </config-key>
+
+                    <config-key id="db-binlog-dir" name="Binary Log Directory">
+                        <summary>Source directory for binary logs (archive-push) or destination (archive-get).</summary>
+
+                        <text>
+                            <p>Where MySQL/MariaDB writes binary logs. If unspecified, myBackRest queries <code>@@log_bin_basename</code> at connect time. Required when running archive commands without a live database connection.</p>
+                        </text>
+
+                        <example>/var/lib/mysql</example>
+                    </config-key>
+
+                    <config-key id="backup-lock-method" name="Backup Lock Method">
+                        <summary>Locking strategy used during the consistency window.</summary>
+
+                        <text>
+                            <p>Picks how myBackRest holds the database consistent while capturing the final binlog position and InnoDB checkpoint LSN. Use <setting>auto</setting> unless you have a specific compatibility need. <setting>instance</setting> uses <code>LOCK INSTANCE FOR BACKUP</code> (MySQL 8.0.16+); <setting>stage</setting> uses MariaDB's <code>BACKUP STAGE</code> state machine (10.4+); <setting>ftwrl</setting> falls back to the legacy <code>FLUSH TABLES WITH READ LOCK</code> (MySQL 5.7 and Percona &lt; 8.0.16).</p>
+                        </text>
+
+                        <example>stage</example>
+                    </config-key>
+
+                    <config-key id="skip-binlog-archive" name="Skip Binlog Archive Setup">
+                        <summary>Suppress binary-log archive validation.</summary>
+
+                        <text>
+                            <p>By default <cmd>stanza-create</cmd> and <cmd>backup</cmd> verify that <setting>log_bin</setting>, <setting>binlog_format</setting>, and <setting>gtid_mode</setting> are configured for archive-based PITR. Setting this option disables those checks. Use only when you genuinely don't need point-in-time recovery (test environments, replicas with their own binary log retention).</p>
+                        </text>
+
+                        <example>n</example>
+                    </config-key>
+
+                    <config-key id="db-redo-poll-interval" name="InnoDB Redo Log Poll Interval">
+                        <summary>Wake-up interval for the redo-log copier thread.</summary>
+
+                        <text>
+                            <p>How often the background InnoDB redo-log copier polls for newly written log blocks. The default of 100ms is fine for typical workloads; increase it on low-write systems to reduce wakeup overhead, or lower it if your redo log fills faster than myBackRest can drain it.</p>
+                        </text>
+
+                        <example>250ms</example>
+                    </config-key>
                 </config-key-list>
             </config-section>
 
