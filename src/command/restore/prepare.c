@@ -1,20 +1,23 @@
 /***********************************************************************************************************************************
 Restore Prepare Phase
 
-prepareWriteRecoveryFiles is implemented (pure file I/O); prepareInvokeMysqld remains a stub because spawning mysqld and verifying
-graceful exit needs the existing common/exec.c lifecycle plumbing which Phase E will wire up properly.
-
-The recovery cnf is a minimum-viable my.cnf that turns the restored datadir into a closed-door instance: skip-networking blocks
-remote connections, --init-file=<sql> arranges for a SHUTDOWN; statement to fire as soon as recovery completes. The user can then
-start mysqld normally with their own config.
+Both prepareWriteRecoveryFiles and prepareInvokeMysqld are now real. Together they implement the user-chosen mysqld-driven crash
+recovery hand-off — myBackRest writes a single-shot recovery cnf + sql, then forks mysqld which replays InnoDB redo and exits via
+SHUTDOWN. No GPLv2 InnoDB recovery code is linked into the MIT mybackrest binary.
 ***********************************************************************************************************************************/
 #include <build.h>
 
+#include <stdlib.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include "command/restore/prepare.h"
 #include "common/debug.h"
+#include "common/fork.h"
 #include "common/log.h"
 #include "common/type/buffer.h"
 #include "common/type/string.h"
+#include "common/type/stringList.h"
 
 #define MYBACKREST_RECOVERY_CNF                                     "mybackrest_recovery.cnf"
 #define MYBACKREST_RECOVERY_SQL                                     "mybackrest_recovery.sql"
@@ -66,7 +69,6 @@ prepareWriteRecoveryFiles(const Storage *const restoreStorage, const String *con
         const String *const sqlPath = strNewFmt("%s/%s", strZ(restorePath), MYBACKREST_RECOVERY_SQL);
         storagePutP(storageNewWriteP(restoreStorage, sqlPath), BUFSTR(sql));
 
-        // Belt-and-braces: log the mysqld path even though we don't invoke it here. prepareInvokeMysqld is responsible for that.
         if (mysqldPath != NULL)
             LOG_INFO_FMT("recovery files written; run: %s --defaults-file=%s/%s", strZ(mysqldPath), strZ(restorePath), MYBACKREST_RECOVERY_CNF);
         else
@@ -89,7 +91,60 @@ prepareInvokeMysqld(const String *const mysqldPath, const String *const restoreP
     ASSERT(mysqldPath != NULL);
     ASSERT(restorePath != NULL);
 
-    // TODO(myBackRest-E): use common/exec.c to fork+exec; capture stdout/stderr to recovery.log; check exit code; remove pid file.
-    // Reference for the lifecycle pattern: src/command/control/start.c which already invokes external processes.
-    THROW(AssertError, "TODO(myBackRest-E): prepareInvokeMysqld — fork+exec mysqld + wait for SHUTDOWN exit");
+    MEM_CONTEXT_TEMP_BEGIN()
+    {
+        // Build argv: [mysqld, --defaults-file=<restorePath>/mybackrest_recovery.cnf]. Use the long-form so the path is
+        // unambiguous; mysqld parses it the same on MySQL and MariaDB.
+        StringList *const argv = strLstNew();
+        strLstAdd(argv, mysqldPath);
+        strLstAdd(argv, strNewFmt("--defaults-file=%s/%s", strZ(restorePath), MYBACKREST_RECOVERY_CNF));
+
+        LOG_INFO_FMT(
+            "invoking mysqld for one-shot recovery: %s --defaults-file=%s/%s",
+            strZ(mysqldPath), strZ(restorePath), MYBACKREST_RECOVERY_CNF);
+
+        const pid_t pid = forkSafe();
+
+        if (pid == 0)
+        {
+            // Child — exec mysqld. The recovery cnf points log-error at <restorePath>/mybackrest_recovery.log so we don't need
+            // to pipe stdout/stderr; the operator can `tail` that file if recovery fails.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+            THROW_ON_SYS_ERROR_FMT(
+                execvp(strZ(strLstGet(argv, 0)), UNCONSTIFY(char **, strLstPtr(argv))) == -1, ExecuteError,
+                "unable to exec mysqld at '%s'", strZ(mysqldPath));
+#pragma GCC diagnostic pop
+
+            exit(127);                                                  // Unreachable, but keeps the compiler happy
+        }
+
+        // Parent — wait for the child to exit. mysqld will recover, run the init-file (SHUTDOWN;), and exit cleanly. Recovery
+        // can take a long time on large redo logs so no timeout — the operator can SIGTERM the parent if needed.
+        int status;
+        const pid_t waited = waitpid(pid, &status, 0);
+
+        THROW_ON_SYS_ERROR(waited == -1, ExecuteError, "waitpid failed for mysqld recovery");
+
+        if (!WIFEXITED(status))
+        {
+            THROW_FMT(
+                ExecuteError, "mysqld recovery process did not exit normally — check %s/%s for details",
+                strZ(restorePath), MYBACKREST_RECOVERY_LOG);
+        }
+
+        const int exitCode = WEXITSTATUS(status);
+
+        if (exitCode != 0)
+        {
+            THROW_FMT(
+                ExecuteError, "mysqld recovery exited with status %d — check %s/%s for details",
+                exitCode, strZ(restorePath), MYBACKREST_RECOVERY_LOG);
+        }
+
+        LOG_INFO("mysqld recovery completed; datadir is clean and ready for normal startup");
+    }
+    MEM_CONTEXT_TEMP_END();
+
+    FUNCTION_LOG_RETURN_VOID();
 }
