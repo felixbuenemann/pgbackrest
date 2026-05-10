@@ -51,4 +51,14 @@ Functions
 // Scan a binlog file from beginning to end, returning summary metadata. Reads only event headers (19 bytes per event).
 FN_EXTERN MysqlBinlogInfo *mysqlBinlogScan(const Storage *storage, const String *binlogPath);
 
+/***********************************************************************************************************************************
+Macros for function logging
+***********************************************************************************************************************************/
+FN_EXTERN void mysqlBinlogInfoToLog(const MysqlBinlogInfo *this, StringStatic *debugLog);
+
+#define FUNCTION_LOG_MY_BINLOG_INFO_TYPE                                                                                           \
+    MysqlBinlogInfo *
+#define FUNCTION_LOG_MY_BINLOG_INFO_FORMAT(value, buffer, bufferSize)                                                              \
+    FUNCTION_LOG_OBJECT_FORMAT(value, mysqlBinlogInfoToLog, buffer, bufferSize)
+
 #endif
