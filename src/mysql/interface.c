@@ -89,6 +89,58 @@ mysqlAutoCnfReadUuid(const Storage *const storage, const String *const dataPath)
     FUNCTION_LOG_RETURN(STRING, result);
 }
 
+/***********************************************************************************************************************************
+Decode the InnoDB FSP_SPACE_FLAGS page-size field
+
+FSP_SPACE_FLAGS bits 6..9 encode `page_ssize`. Per
+storage/innobase/include/fsp0types.h plus the formula confirmed against the FIL header dumps in the cloned mysql-server tree:
+
+    ssize == 0: legacy default = 16 KiB                           (also written when --innodb-page-size is omitted on 5.7+)
+    ssize == 1: 4 KiB                                             (2048 << 1)
+    ssize == 2: 8 KiB                                             (2048 << 2)
+    ssize == 3: 16 KiB                                            (2048 << 3)
+    ssize == 4: 32 KiB                                            (2048 << 4)
+    ssize == 5: 64 KiB                                            (2048 << 5)
+
+Anything else is unsupported or corrupt.
+***********************************************************************************************************************************/
+static MysqlPageSize
+mysqlPageSizeFromFlags(const uint32_t flags)
+{
+    const unsigned int ssize = (flags >> 6) & 0xF;
+
+    switch (ssize)
+    {
+        case 0:
+        case 3:
+            return mysqlPageSize16K;
+
+        case 1:
+            return mysqlPageSize4K;
+
+        case 2:
+            return mysqlPageSize8K;
+
+        case 4:
+            return mysqlPageSize32K;
+
+        case 5:
+            return mysqlPageSize64K;
+
+        default:
+            THROW_FMT(FormatError, "InnoDB FSP_SPACE_FLAGS encodes unsupported page_ssize %u (raw flags 0x%08x)", ssize, flags);
+    }
+}
+
+/***********************************************************************************************************************************
+Read a 4-byte big-endian unsigned int from a buffer
+***********************************************************************************************************************************/
+static uint32_t
+mysqlReadU32Be(const unsigned char *const p)
+{
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
 /**********************************************************************************************************************************/
 FN_EXTERN MysqlControl
 mysqlControlFromIbdata(const Storage *const storage, const String *const dataPath)
@@ -101,8 +153,94 @@ mysqlControlFromIbdata(const Storage *const storage, const String *const dataPat
     ASSERT(storage != NULL);
     ASSERT(dataPath != NULL);
 
-    // TODO(myBackRest-C): parse FSP_HEADER from page 0 of ibdata1 / mysql.ibd
-    THROW(AssertError, "TODO(myBackRest-C): mysqlControlFromIbdata not implemented");
+    MysqlControl result = {0};
+
+    MEM_CONTEXT_TEMP_BEGIN()
+    {
+        // Try MYSQL_FILE_IBDATA1 first (always present on 5.7 + 8.0); fall back to MYSQL_FILE_MYSQL_IBD which exists on 8.0+
+        // even when ibdata1 has been split out. Both files start with a tablespace whose page 0 carries an FSP_HEADER.
+        const String *const ibdata1Path = strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_IBDATA1);
+        const String *fileToRead = NULL;
+
+        if (storageExistsP(storage, ibdata1Path))
+        {
+            fileToRead = ibdata1Path;
+        }
+        else
+        {
+            const String *const mysqlIbdPath = strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_MYSQL_IBD);
+
+            if (storageExistsP(storage, mysqlIbdPath))
+                fileToRead = mysqlIbdPath;
+        }
+
+        if (fileToRead == NULL)
+        {
+            THROW_FMT(
+                FileMissingError, "neither %s nor %s found under '%s' — datadir does not look like an InnoDB installation",
+                MYSQL_FILE_IBDATA1, MYSQL_FILE_MYSQL_IBD, strZ(dataPath));
+        }
+
+        // Read just the first 64 KiB which is enough for any supported page size (up to 64K).
+        Buffer *const page0 = storageGetP(
+            storageNewReadP(storage, fileToRead, .limit = VARUINT64(mysqlPageSize64K)));
+
+        if (bufUsed(page0) < FSP_SPACE_FLAGS + 4)
+        {
+            THROW_FMT(
+                FormatError, "%s is too short (%zu bytes) to contain an FSP_HEADER", strZ(fileToRead), bufUsed(page0));
+        }
+
+        const unsigned char *const data = bufPtrConst(page0);
+
+        // Pull the fields we care about
+        const uint32_t spaceId = mysqlReadU32Be(data + FIL_PAGE_SPACE_ID);
+        const uint32_t flags = mysqlReadU32Be(data + FSP_SPACE_FLAGS);
+        const uint32_t spaceIdFsp = mysqlReadU32Be(data + FSP_SPACE_ID);
+
+        if (spaceId != spaceIdFsp)
+        {
+            THROW_FMT(
+                FormatError,
+                "%s page 0: FIL_PAGE_SPACE_ID (%u) disagrees with FSP_SPACE_ID (%u) — header is corrupt",
+                strZ(fileToRead), spaceId, spaceIdFsp);
+        }
+
+        result.pageSize = mysqlPageSizeFromFlags(flags);
+
+        // Layout flavor — presence of mysql.ibd indicates 8.0+ data dictionary; the version number itself can't be derived from
+        // the file alone, so leave versionNum at 0 and let callers fill it from a live SELECT VERSION() if available.
+        const bool has80Dictionary = strEqZ(strBase(fileToRead), MYSQL_FILE_MYSQL_IBD) ||
+            storageExistsP(storage, strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_MYSQL_IBD));
+
+        result.versionNum = has80Dictionary ? 80000 : 50700;
+
+        // Redo layout follows from datadir layout
+        result.redoLayout = mysqlRedoLayoutDetect(storage, dataPath);
+
+        // Default to the modern checksum algorithm; mysqlPageChecksumValidate accepts both crc32 variants.
+        result.pageChecksum = mysqlPageChecksumCrc32;
+    }
+    MEM_CONTEXT_TEMP_END();
+
+    FUNCTION_LOG_RETURN(MY_CONTROL, result);
+}
+
+/**********************************************************************************************************************************/
+FN_EXTERN void
+mysqlControlToLog(const MysqlControl *const this, StringStatic *const debugLog)
+{
+    if (this == NULL)
+    {
+        strStcCat(debugLog, "null");
+        return;
+    }
+
+    strStcFmt(
+        debugLog,
+        "{versionNum: %u, pageSize: %u, redoLayout: %u, pageChecksum: %u, lsnCheckpoint: %" PRIu64 "}",
+        this->versionNum, (unsigned int)this->pageSize, (unsigned int)this->redoLayout, (unsigned int)this->pageChecksum,
+        this->lsnCheckpoint);
 }
 
 /**********************************************************************************************************************************/

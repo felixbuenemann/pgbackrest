@@ -140,4 +140,14 @@ FN_EXTERN MysqlRedoLayout mysqlRedoLayoutDetect(const Storage *storage, const St
 FN_EXTERN bool mysqlPageChecksumValidate(
     const unsigned char *page, MysqlPageSize pageSize, MysqlPageChecksumAlgo algo, uint32_t pageNo);
 
+/***********************************************************************************************************************************
+Macros for function logging
+***********************************************************************************************************************************/
+FN_EXTERN void mysqlControlToLog(const MysqlControl *this, StringStatic *debugLog);
+
+#define FUNCTION_LOG_MY_CONTROL_TYPE                                                                                               \
+    MysqlControl
+#define FUNCTION_LOG_MY_CONTROL_FORMAT(value, buffer, bufferSize)                                                                  \
+    FUNCTION_LOG_OBJECT_FORMAT(&value, mysqlControlToLog, buffer, bufferSize)
+
 #endif
