@@ -309,26 +309,27 @@ executable(
 
 ####################################################################################################################################
 # Standalone synthetic-data tests for the new myBackRest modules. Each test links against the full mybackrest source minus main.c
-# and exercises one module in isolation. Run via: build/src/standalone-binlog-test
+# and exercises one module in isolation. Run via:
+#     meson compile -C build && for t in build/src/standalone-*-test; do echo "== $t =="; $t || exit 1; done
 ####################################################################################################################################
+standalone_test_deps = [
+    lib_backtrace, lib_bz2, lib_openssl, lib_lz4, lib_mariadb, lib_pq, lib_ssh2, lib_xml, lib_z, lib_zstd,
+]
+
 executable(
     'standalone-binlog-test',
-    src_common,
-    src_mybackrest,
-    files('../test/src/standalone/binlogScanTest.c'),
-    help_auto_c_inc,
-    interface_auto_c_inc,
-    dependencies: [
-        lib_backtrace,
-        lib_bz2,
-        lib_openssl,
-        lib_lz4,
-        lib_mariadb,
-        lib_pq,
-        lib_ssh2,
-        lib_xml,
-        lib_z,
-        lib_zstd,
-    ],
-    install: false,
+    src_common, src_mybackrest, files('../test/src/standalone/binlogScanTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+executable(
+    'standalone-pagechecksum-test',
+    src_common, src_mybackrest, files('../test/src/standalone/pageChecksumTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+executable(
+    'standalone-autocnf-test',
+    src_common, src_mybackrest, files('../test/src/standalone/autoCnfTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
