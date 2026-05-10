@@ -345,3 +345,21 @@ executable(
     src_common, src_mybackrest, files('../test/src/standalone/tableSpaceIterTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
+
+executable(
+    'standalone-aria-engine-test',
+    src_common, src_mybackrest, files('../test/src/standalone/ariaEngineTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+executable(
+    'standalone-rocksdb-engine-test',
+    src_common, src_mybackrest, files('../test/src/standalone/rocksdbEngineTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+executable(
+    'standalone-lock-method-test',
+    src_common, src_mybackrest, files('../test/src/standalone/lockMethodTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)

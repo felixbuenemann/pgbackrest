@@ -59,23 +59,24 @@ mysqlLockMethodSelect(MysqlClient *const client, const MysqlLockMethod userPrefe
         if (userPreference == mysqlLockMethodInstance && vendor != mysqlVendorMysql && vendor != mysqlVendorPercona)
         {
             THROW_FMT(
-                AssertError, "backup-lock-method=instance is only supported on MySQL/Percona, not vendor %u",
+                OptionInvalidError, "backup-lock-method=instance is only supported on MySQL/Percona, not vendor %u",
                 (unsigned int)vendor);
         }
 
         if (userPreference == mysqlLockMethodInstance && version < MYSQL_VERSION_LOCK_INSTANCE)
         {
             THROW_FMT(
-                AssertError, "backup-lock-method=instance requires MySQL/Percona >= 8.0.16; server reports version %u", version);
+                OptionInvalidError,
+                "backup-lock-method=instance requires MySQL/Percona >= 8.0.16; server reports version %u", version);
         }
 
         if (userPreference == mysqlLockMethodStage && vendor != mysqlVendorMariadb)
-            THROW(AssertError, "backup-lock-method=stage is only supported on MariaDB");
+            THROW(OptionInvalidError, "backup-lock-method=stage is only supported on MariaDB");
 
         if (userPreference == mysqlLockMethodStage && version < MARIADB_VERSION_BACKUP_STAGE)
         {
             THROW_FMT(
-                AssertError, "backup-lock-method=stage requires MariaDB >= 10.4; server reports version %u", version);
+                OptionInvalidError, "backup-lock-method=stage requires MariaDB >= 10.4; server reports version %u", version);
         }
 
         FUNCTION_LOG_RETURN(STRING_ID, userPreference);
