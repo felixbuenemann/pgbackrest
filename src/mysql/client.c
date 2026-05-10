@@ -13,7 +13,9 @@ What this client does NOT implement (intentionally, see plan Phase B):
 ***********************************************************************************************************************************/
 #include <build.h>
 
+#include <errmsg.h>
 #include <mysql.h>
+#include <mysqld_error.h>
 #include <string.h>
 
 #include "common/debug.h"
@@ -123,6 +125,75 @@ mysqlClientDetectVendor(const char *const serverInfo, const char *const versionC
     return mysqlVendorMysql;
 }
 
+/***********************************************************************************************************************************
+Initialize a fresh MYSQL handle with our standard options. If allowOldPassword is true, additionally disable MYSQL_SECURE_AUTH
+and ask libmariadb to use mysql_old_password as the default auth plugin.
+
+Returns the handle (must be mysql_close'd by the caller) or NULL on out-of-memory.
+***********************************************************************************************************************************/
+static MYSQL *
+mysqlClientInitHandle(const TimeMSec timeoutMs, const bool allowOldPassword)
+{
+    MYSQL *const conn = mysql_init(NULL);
+    if (conn == NULL)
+        return NULL;
+
+    const unsigned int timeoutSec = (unsigned int)((timeoutMs + 999) / 1000);
+    const unsigned int timeoutSecOrOne = timeoutSec == 0 ? 1 : timeoutSec;
+
+    mysql_options(conn, MYSQL_OPT_CONNECT_TIMEOUT, &timeoutSecOrOne);
+    mysql_options(conn, MYSQL_OPT_READ_TIMEOUT, &timeoutSecOrOne);
+    mysql_options(conn, MYSQL_OPT_WRITE_TIMEOUT, &timeoutSecOrOne);
+
+    mysql_optionsv(conn, MYSQL_OPT_CONNECT_ATTR_ADD, (const void *)"program_name", (const void *)PROJECT_BIN);
+
+    if (allowOldPassword)
+    {
+        // MYSQL_SECURE_AUTH defaults to true and refuses pre-4.1 hashes; disable it so legacy 5.5 servers (or any server with
+        // a user account that still has a pre-4.1 password hash) can be reached. Also nudge the default auth plugin so the
+        // old protocol is the FIRST one we offer, which avoids a round-trip through the modern plugins.
+        my_bool no = 0;
+        mysql_options(conn, MYSQL_SECURE_AUTH, &no);
+        mysql_options(conn, MYSQL_DEFAULT_AUTH, "mysql_old_password");
+    }
+
+    return conn;
+}
+
+/***********************************************************************************************************************************
+Try mysql_real_connect on the supplied handle with our connection parameters. Returns true on success, false on failure (caller
+inspects mysql_errno on the handle to decide what to do next).
+***********************************************************************************************************************************/
+static bool
+mysqlClientTryConnect(MYSQL *const conn, const MysqlClient *const this)
+{
+    return mysql_real_connect(
+        conn,
+        mysqlClientHost(this) != NULL ? strZ(mysqlClientHost(this)) : NULL,
+        mysqlClientUser(this) != NULL ? strZ(mysqlClientUser(this)) : NULL,
+        this->pub.password != NULL ? strZ(this->pub.password) : NULL,
+        mysqlClientDatabase(this) != NULL ? strZ(mysqlClientDatabase(this)) : NULL,
+        mysqlClientPort(this),
+        mysqlClientSocket(this) != NULL ? strZ(mysqlClientSocket(this)) : NULL,
+        /* client_flag */ 0) != NULL;
+}
+
+/***********************************************************************************************************************************
+Decide whether a connection error is the "server requires the old (pre-4.1.1) auth protocol" case, which is the only failure mode
+we'll auto-retry with old-password enabled. Two error codes can surface this depending on which side detected the mismatch:
+
+  CR_SECURE_AUTH (2049)              libmariadb client refuses the server's old-hash response
+  ER_NOT_SUPPORTED_AUTH_MODE (1251)  server explicitly says the client doesn't support the requested protocol
+
+Anything else (wrong password, host unreachable, refused connection, timeout) is a real failure that retrying with old-password
+won't help and shouldn't try to.
+***********************************************************************************************************************************/
+static bool
+mysqlClientErrorWantsOldPassword(const unsigned int errnoVal)
+{
+    return errnoVal == CR_SECURE_AUTH || errnoVal == ER_NOT_SUPPORTED_AUTH_MODE;
+}
+
 /**********************************************************************************************************************************/
 FN_EXTERN MysqlClient *
 mysqlClientOpen(MysqlClient *const this)
@@ -136,45 +207,54 @@ mysqlClientOpen(MysqlClient *const this)
 
     MEM_CONTEXT_TEMP_BEGIN()
     {
-        this->connection = mysql_init(NULL);
+        // First attempt: default auth (mysql_native_password / caching_sha2_password)
+        this->connection = mysqlClientInitHandle(mysqlClientTimeout(this), /*allowOldPassword*/ false);
 
         if (this->connection == NULL)
             THROW(DbConnectError, "mysql_init returned NULL (out of memory)");
 
-        // Set timeouts. libmariadb expects whole seconds; round up the millisecond budget to at least 1 second so a sub-second
-        // setting doesn't degenerate to no timeout at all.
-        const unsigned int timeoutSec = (unsigned int)((mysqlClientTimeout(this) + 999) / 1000);
-        const unsigned int timeoutSecOrOne = timeoutSec == 0 ? 1 : timeoutSec;
-
-        mysql_options(this->connection, MYSQL_OPT_CONNECT_TIMEOUT, &timeoutSecOrOne);
-        mysql_options(this->connection, MYSQL_OPT_READ_TIMEOUT, &timeoutSecOrOne);
-        mysql_options(this->connection, MYSQL_OPT_WRITE_TIMEOUT, &timeoutSecOrOne);
-
-        // Set the connection-attribute "program_name" so DBAs see "mybackrest" in performance_schema.session_connect_attrs
-        mysql_optionsv(
-            this->connection, MYSQL_OPT_CONNECT_ATTR_ADD, (const void *)"program_name", (const void *)PROJECT_BIN);
-
-        // Register the cleanup callback BEFORE the connect attempt so a partially-initialized handle still gets freed
+        // Register cleanup BEFORE the connect attempt so a partially-initialized handle still gets freed
         memContextCallbackSet(objMemContext(this), mysqlClientFreeResource, this);
 
-        // Connect via either unix socket or TCP. The libmariadb signature is the same — pass NULL for whichever path isn't
-        // applicable.
-        if (mysql_real_connect(
-                this->connection,
-                mysqlClientHost(this) != NULL ? strZ(mysqlClientHost(this)) : NULL,
-                mysqlClientUser(this) != NULL ? strZ(mysqlClientUser(this)) : NULL,
-                this->pub.password != NULL ? strZ(this->pub.password) : NULL,
-                mysqlClientDatabase(this) != NULL ? strZ(mysqlClientDatabase(this)) : NULL,
-                mysqlClientPort(this),
-                mysqlClientSocket(this) != NULL ? strZ(mysqlClientSocket(this)) : NULL,
-                /* client_flag */ 0) == NULL)
+        if (!mysqlClientTryConnect(this->connection, this))
         {
-            THROW_FMT(
-                DbConnectError, "unable to connect to MySQL server at %s:%u: %s",
-                mysqlClientHost(this) != NULL ? strZ(mysqlClientHost(this)) :
-                    (mysqlClientSocket(this) != NULL ? strZ(mysqlClientSocket(this)) : "(unspecified)"),
-                mysqlClientPort(this),
-                mysql_error(this->connection));
+            // Capture error info BEFORE we close + retry, since mysql_close clears them
+            const unsigned int errnoVal = mysql_errno(this->connection);
+            const char *const errMsg = mysql_error(this->connection);
+
+            if (mysqlClientErrorWantsOldPassword(errnoVal))
+            {
+                LOG_WARN_FMT(
+                    "first connection attempt rejected (errno %u: %s); retrying with mysql_old_password enabled",
+                    errnoVal, errMsg);
+
+                // Fresh handle — libmariadb's auth state isn't safely reusable after a failed connect
+                mysql_close(this->connection);
+                this->connection = mysqlClientInitHandle(mysqlClientTimeout(this), /*allowOldPassword*/ true);
+
+                if (this->connection == NULL)
+                    THROW(DbConnectError, "mysql_init returned NULL on retry");
+
+                if (!mysqlClientTryConnect(this->connection, this))
+                {
+                    THROW_FMT(
+                        DbConnectError, "unable to connect to MySQL server at %s:%u (after old-password retry): %s",
+                        mysqlClientHost(this) != NULL ? strZ(mysqlClientHost(this)) :
+                            (mysqlClientSocket(this) != NULL ? strZ(mysqlClientSocket(this)) : "(unspecified)"),
+                        mysqlClientPort(this),
+                        mysql_error(this->connection));
+                }
+            }
+            else
+            {
+                // Non-auth failure: don't waste a round-trip on a retry that won't help
+                THROW_FMT(
+                    DbConnectError, "unable to connect to MySQL server at %s:%u: %s",
+                    mysqlClientHost(this) != NULL ? strZ(mysqlClientHost(this)) :
+                        (mysqlClientSocket(this) != NULL ? strZ(mysqlClientSocket(this)) : "(unspecified)"),
+                    mysqlClientPort(this),
+                    errMsg);
+            }
         }
 
         // Capture vendor + numeric version. mysql_get_server_version returns NN_NN_NN packed as MAJOR*10000 + MINOR*100 + PATCH.
