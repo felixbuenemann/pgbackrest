@@ -283,13 +283,13 @@ src_mybackrest = [
     'storage/sftp/read.c',
     'storage/sftp/storage.c',
     'storage/sftp/write.c',
-    'main.c',
 ]
 
 executable(
     'mybackrest',
     src_common,
     src_mybackrest,
+    'main.c',
     help_auto_c_inc,
     interface_auto_c_inc,
     dependencies: [
@@ -305,4 +305,30 @@ executable(
         lib_zstd,
     ],
     install: true,
+)
+
+####################################################################################################################################
+# Standalone synthetic-data tests for the new myBackRest modules. Each test links against the full mybackrest source minus main.c
+# and exercises one module in isolation. Run via: build/src/standalone-binlog-test
+####################################################################################################################################
+executable(
+    'standalone-binlog-test',
+    src_common,
+    src_mybackrest,
+    files('../test/src/standalone/binlogScanTest.c'),
+    help_auto_c_inc,
+    interface_auto_c_inc,
+    dependencies: [
+        lib_backtrace,
+        lib_bz2,
+        lib_openssl,
+        lib_lz4,
+        lib_mariadb,
+        lib_pq,
+        lib_ssh2,
+        lib_xml,
+        lib_z,
+        lib_zstd,
+    ],
+    install: false,
 )
