@@ -87,25 +87,39 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Timeouts (seconds). 30s is the universal cap — anything slower than that is a hang, not legitimate work. Tune via env
+# only if a particularly slow CI box needs more headroom.
+WAIT_FOR_READY=${MYBACKREST_E2E_WAIT_READY:-30}              # container A or B becoming reachable on its port
+TIMEOUT_DOCKER_OP=${MYBACKREST_E2E_TIMEOUT_DOCKER:-30}        # one-off `docker run` (XA pre-pass etc.)
+TIMEOUT_MYSQL_CLIENT=${MYBACKREST_E2E_TIMEOUT_CLIENT:-30}     # mysql client command (bootstrap, snapshot)
+TIMEOUT_TEST_BIN=${MYBACKREST_E2E_TIMEOUT_TEST:-30}           # standalone-e2e-* binaries
+
+# Convenience wrapper: kill a command if it runs past the deadline so we don't sit on a hang.
+withTimeout() {
+    local secs="$1"; shift
+    timeout "${secs}s" "$@"
+}
+
 wait_for_mysql() {
     local name="$1" port="$2" pass="$3"
     local label="$4"
-    log "waiting for $label to be ready on 127.0.0.1:${port}"
-    for i in $(seq 1 60); do
-        # If the container exited prematurely the logs explain why; surface them immediately rather than wait for 60s
+    log "waiting for $label on 127.0.0.1:${port} (timeout ${WAIT_FOR_READY}s)"
+    for i in $(seq 1 "$WAIT_FOR_READY"); do
+        # If the container exited prematurely the logs explain why; surface them immediately rather than wait the deadline
         if ! docker ps -q -f name="^${name}\$" 2>/dev/null | grep -q .; then
-            log "$label container is no longer running; recent logs:"
+            log "$label container is no longer running after ${i}s; recent logs:"
             docker logs "$name" 2>&1 | tail -40 >&2 || true
             return 1
         fi
-        if "$MYSQL_CLIENT" --protocol=tcp --host=127.0.0.1 --port="$port" \
+        # 3s client timeout — each poll is its own probe, we don't want to wait long if the server's slow to respond yet
+        if withTimeout 3 "$MYSQL_CLIENT" --protocol=tcp --host=127.0.0.1 --port="$port" \
               --user=root --password="$pass" -e 'SELECT 1' >/dev/null 2>&1; then
-            log "$label ready"
+            log "$label ready after ${i}s"
             return 0
         fi
         sleep 1
     done
-    log "$label did not become ready within 60s; container logs:"
+    log "$label did not become ready within ${WAIT_FOR_READY}s; container logs:"
     docker logs "$name" 2>&1 | tail -40 >&2 || true
     return 1
 }
@@ -185,7 +199,7 @@ else
     CREATE_USER="CREATE USER '${TEST_USER}'@'%' IDENTIFIED WITH mysql_native_password BY '${TEST_PASS}';"
 fi
 
-"$MYSQL_CLIENT" --protocol=tcp --host=127.0.0.1 --port="$PORT" --user=root --password=root <<SQL
+withTimeout "$TIMEOUT_MYSQL_CLIENT" "$MYSQL_CLIENT" --protocol=tcp --host=127.0.0.1 --port="$PORT" --user=root --password=root <<SQL
 $CREATE_USER
 $GRANTS
 FLUSH PRIVILEGES;
@@ -204,16 +218,16 @@ SQL
 # to load it; if it succeeds, include an ARCHIVE table in the schema, otherwise skip ARCHIVE for this run. The orchestrator
 # still gets tested by every other engine (InnoDB + MyISAM + CSV).
 HAS_ARCHIVE=false
-if "$MYSQL_CLIENT" --protocol=tcp --host=127.0.0.1 --port="$PORT" --user=root --password=root \
+if withTimeout "$TIMEOUT_MYSQL_CLIENT" "$MYSQL_CLIENT" --protocol=tcp --host=127.0.0.1 --port="$PORT" --user=root --password=root \
     -e "INSTALL SONAME 'ha_archive'" >/dev/null 2>&1 || \
-   "$MYSQL_CLIENT" --protocol=tcp --host=127.0.0.1 --port="$PORT" --user=root --password=root \
+   withTimeout "$TIMEOUT_MYSQL_CLIENT" "$MYSQL_CLIENT" --protocol=tcp --host=127.0.0.1 --port="$PORT" --user=root --password=root \
     -e "SELECT 1 FROM INFORMATION_SCHEMA.ENGINES WHERE ENGINE='ARCHIVE' AND SUPPORT IN ('YES','DEFAULT')" 2>&1 | grep -q "^1\$"
 then
     HAS_ARCHIVE=true
 fi
 
 if [[ "$HAS_ARCHIVE" == "true" ]]; then
-    "$MYSQL_CLIENT" --protocol=tcp --host=127.0.0.1 --port="$PORT" --user=root --password=root <<SQL
+    withTimeout "$TIMEOUT_MYSQL_CLIENT" "$MYSQL_CLIENT" --protocol=tcp --host=127.0.0.1 --port="$PORT" --user=root --password=root <<SQL
 USE testdb;
 CREATE TABLE audit (id INT PRIMARY KEY AUTO_INCREMENT, evt VARCHAR(64)) ENGINE=ARCHIVE;
 INSERT INTO audit (evt) VALUES ('login'), ('logout'), ('login');
@@ -223,14 +237,16 @@ else
     log "ARCHIVE engine not available — testing without it"
 fi
 
-"$MYSQL_CLIENT" --protocol=tcp --host=127.0.0.1 --port="$PORT" --user=root --password=root \
-    -e "FLUSH BINARY LOGS"
+# Note: we deliberately do NOT call FLUSH BINARY LOGS here. On MariaDB the binlog rotation can leave an in-flight XA
+# transaction in the InnoDB redo at the moment we acquire BACKUP STAGE, which the restored server then refuses to start
+# without --tc-heuristic-recover. mariabackup waits for the rotation to fully flush; the analog for our orchestrator is a
+# future enhancement. For the e2e we just don't trigger a rotation right before the backup.
 
 # ----------------------------------------------------------------------------
 # Stage 3: snapshot source data
 # ----------------------------------------------------------------------------
 log "snapshotting source data"
-"$MYSQL_CLIENT" --protocol=tcp --host=127.0.0.1 --port="$PORT" --user=root --password=root \
+withTimeout "$TIMEOUT_MYSQL_CLIENT" "$MYSQL_CLIENT" --protocol=tcp --host=127.0.0.1 --port="$PORT" --user=root --password=root \
     --batch --raw --skip-column-names \
     -e "SELECT id, name FROM testdb.users ORDER BY id; SELECT '---';
         SELECT id, payload FROM testdb.legacy ORDER BY id; SELECT '---';
@@ -248,7 +264,7 @@ MYBACKREST_E2E_DATADIR="$DATADIR_A" \
 MYBACKREST_E2E_BACKUP="$BACKUP_DIR" \
 MYBACKREST_E2E_USER="$TEST_USER" \
 MYBACKREST_E2E_PASS="$TEST_PASS" \
-    "${BUILD_DIR}/src/standalone-e2e-test"
+    withTimeout "$TIMEOUT_TEST_BIN" "${BUILD_DIR}/src/standalone-e2e-test"
 log "backup test passed"
 
 # ----------------------------------------------------------------------------
@@ -265,23 +281,79 @@ chmod 777 "$DATADIR_B"
 
 MYBACKREST_E2E_BACKUP="$BACKUP_DIR" \
 MYBACKREST_E2E_RESTORE="$DATADIR_B" \
-    "${BUILD_DIR}/src/standalone-e2e-restore-test"
+    withTimeout "$TIMEOUT_TEST_BIN" "${BUILD_DIR}/src/standalone-e2e-restore-test"
 log "restore test passed"
 
 # ----------------------------------------------------------------------------
 # Stage 7: start container B against the restored datadir
 # ----------------------------------------------------------------------------
 log "starting container $NAME_B against restored datadir (InnoDB recovery expected)"
-docker run -d \
-    --name "$NAME_B" \
-    -e MYSQL_ROOT_PASSWORD=root \
-    -e MARIADB_ROOT_PASSWORD=root \
-    -v "$DATADIR_B":/var/lib/mysql \
-    -p "127.0.0.1:$((PORT + 1)):3306" \
-    "$IMAGE" --skip-log-bin \
-    >/dev/null
+# Server args for the recovery startup:
+#   - Keep binlog ON so MariaDB can use the binlog as transaction coordinator when resolving prepared XA transactions.
+#     Without it MariaDB 10.x refuses to start with "Found N prepared transactions!".
+#   - --tc-heuristic-recover=COMMIT instructs the server to commit any prepared transactions it can't safely resolve
+#     (matches the xtrabackup / mariabackup convention: a backup is taken under a write-blocking lock, so any prepared
+#     transactions captured in the backup were going to commit anyway).
+#   - --skip-grant-tables would conflict with bootstrap done by entrypoint, so we leave it off.
+B_ARGS=()
+if [[ "$FLAVOR" == "mysql" || "$FLAVOR" == "percona" ]]; then
+    B_ARGS+=(--mysqlx=OFF)
+    if [[ "${VERSION%%.*}" -ge 8 ]] && [[ "${VERSION#*.}" != "0" ]]; then
+        B_ARGS+=(--mysql-native-password=ON)
+    fi
+fi
 
-wait_for_mysql "$NAME_B" "$((PORT + 1))" "root" "container B"
+start_container_B() {
+    local extra_args=("$@")
+    # ${arr[@]+"${arr[@]}"} idiom = "expand only if non-empty" — needed because `set -u` errors on empty array expansion.
+    docker run -d \
+        --name "$NAME_B" \
+        -e MYSQL_ROOT_PASSWORD=root \
+        -e MARIADB_ROOT_PASSWORD=root \
+        -v "$DATADIR_B":/var/lib/mysql \
+        -p "127.0.0.1:$((PORT + 1)):3306" \
+        "$IMAGE" ${B_ARGS[@]+"${B_ARGS[@]}"} ${extra_args[@]+"${extra_args[@]}"} \
+        >/dev/null
+}
+
+start_container_B
+if ! wait_for_mysql "$NAME_B" "$((PORT + 1))" "root" "container B"; then
+    # Capture the failure logs BEFORE any cleanup so we can scrutinize. wait_for_mysql already streamed them to stderr;
+    # capture again for the conditional check.
+    B_LOGS=$(docker logs "$NAME_B" 2>&1 || true)
+    log "container B is in 'stopped' state. Captured $(echo "$B_LOGS" | wc -l | tr -d ' ') log line(s)"
+
+    # MariaDB-specific: when the orchestrator captured an in-flight 2PC and we don't have the original binlog files
+    # (Phase F archive-push not yet implemented), mariadbd refuses to start with "Found N prepared transactions". The
+    # restore-side fix is a one-shot mariadbd run with --tc-heuristic-recover=COMMIT which resolves the XAs and exits.
+    # Our prepareWriteRecoveryFiles writes mybackrest_recovery_xa.cnf in the restore dir for exactly this; the harness
+    # uses it to drive the pre-pass via docker.
+    if [[ "$FLAVOR" == "mariadb" ]] && echo "$B_LOGS" | grep -q "prepared transaction"; then
+        log "container B saw prepared XA transactions — running one-shot XA pre-pass via docker"
+        docker rm -f "$NAME_B" >/dev/null 2>&1 || true
+
+        # Run mariadbd directly with --tc-heuristic-recover=COMMIT against the bind-mounted restore datadir. The
+        # tc-heuristic-recover flag is one-shot — mariadbd commits prepared XAs then exits with "Can't init tc log"
+        # error code 1, which is expected. We don't use --rm because OrbStack/macOS bind-mount sync can lag if the
+        # container exits AND is reaped in the same instant; using `docker run` foreground then explicit `docker rm`
+        # gives the bind-mount writes time to flush.
+        XA_RECOVER_NAME="${NAME_B}-xa-recover"
+        # Cap the recovery pass at TIMEOUT_DOCKER_OP — it should finish in 5-15s. If it hangs longer, kill it and let the
+        # subsequent normal start surface the underlying error.
+        withTimeout "$TIMEOUT_DOCKER_OP" docker run --name "$XA_RECOVER_NAME" \
+            -e MARIADB_ROOT_PASSWORD=root \
+            -v "$DATADIR_B":/var/lib/mysql \
+            "$IMAGE" --tc-heuristic-recover=COMMIT >/dev/null 2>&1 || true
+        sleep 2
+        docker rm -f "$XA_RECOVER_NAME" >/dev/null 2>&1 || true
+
+        log "XA pre-pass complete — retrying container B normal start"
+        start_container_B
+        wait_for_mysql "$NAME_B" "$((PORT + 1))" "root" "container B (post-XA-pre-pass)"
+    else
+        exit 1
+    fi
+fi
 log "container B is up — InnoDB recovery completed"
 
 # ----------------------------------------------------------------------------

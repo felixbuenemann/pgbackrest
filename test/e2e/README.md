@@ -1,102 +1,119 @@
 # myBackRest end-to-end test harness
 
-Temporary single-flavor / single-version e2e harness that runs the hot
-backup orchestrator against a real, locally-installed MySQL server.
-Catches integration bugs that the scripted `harnessMysql` shim can't —
-real SQL parsing, real lock semantics, real SHOW MASTER STATUS column
-ordering, vendor-specific quirks like `auto.cnf` auto-generation.
+Two complementary drivers, both running the same `standalone-e2e-test`
+binary which connects to a server (TCP or socket) and drives the hot
+backup orchestrator end-to-end. The harnesses catch integration bugs
+the scripted `harnessMysql` shim can't — real SQL parsing, real lock
+semantics, real cross-flavor wire-protocol drift, version-conditional
+quirks (SHOW MASTER STATUS rename in MySQL 8.4, MariaDB full_crc32
+checksum trailer, undo tablespace naming, etc.).
 
-## Why MySQL (and not MariaDB or both)?
+## run-docker.sh — multi-flavor / multi-version matrix
 
-This is the bridge until a Docker-driven multi-flavor / multi-version
-matrix lands (Phase H of the project plan). One flavor is enough to
-catch the integration-level bugs that the scripted shim misses; running
-both against a single locally-installed package would just complicate
-the harness without adding meaningful coverage on a one-machine setup
-(apt-installed `mysql-server` and `mariadb-server` conflict — they
-both provide `/usr/sbin/mysqld` and can't coexist).
+```
+test/e2e/run-docker.sh <flavor> <version>
+```
 
-MySQL is the picked flavor because the orchestrator's MySQL paths are
-the more common production target (LOCK INSTANCE FOR BACKUP, real
-`auto.cnf`, Executed_Gtid_Set populated in SHOW MASTER STATUS).
-MariaDB's BACKUP STAGE state machine + `@@gtid_binlog_pos` paths are
-covered by `harnessMysql`-driven unit tests; they'll get real-server
-coverage once the Docker matrix arrives.
+`flavor` is `mysql` | `mariadb` | `percona`. `version` is any tag the
+upstream image publishes:
 
-The test binary itself (`standalone-e2e-test`) is vendor-agnostic.
-Vendor- and version-conditional assertions already exist for each
-orchestrator behavior that differs across flavors. Pointing the
-existing binary at a different server flavor just requires a new
-driver script.
+| Flavor   | Image                              | Tested versions    |
+|----------|------------------------------------|--------------------|
+| mysql    | mysql:VERSION                      | 8.0, 8.4           |
+| mariadb  | mariadb:VERSION                    | 10.11, 11.4 (¹)    |
+| percona  | percona/percona-server:VERSION     | 8.0                |
 
-## What it does
+¹ MariaDB has a known limitation — see "MariaDB prepared-XA caveat"
+below.
 
-1. Builds a fresh private datadir under `/tmp/mybackrest-e2e-mysql/`.
-2. Initializes it via `mysqld --initialize-insecure`.
-3. Starts a private `mysqld` on a non-default port (13307) with its
-   own socket — does NOT touch `/var/lib/mysql` or the system
-   `mysql.service`.
-4. Creates a `backup` user with `BACKUP_ADMIN, RELOAD, REPLICATION
-   CLIENT, REPLICATION SLAVE, PROCESS, LOCK TABLES, SELECT` (the
-   MySQL 8.0+ privilege set for a hot backup with LOCK INSTANCE FOR
-   BACKUP).
-5. Populates a test schema with InnoDB and MyISAM tables.
-6. Runs `standalone-e2e-test` which connects via `MysqlClient` and
-   drives `mysqlHotBackup` end-to-end.
-7. Verifies the backup directory's structure, file presence, and
-   manifest round-trip.
-8. Stops `mysqld` and tears down the work directory.
+The harness does a full round-trip per invocation:
 
-## Running
+1. Bootstraps a fresh datadir under `/tmp/mybackrest-e2e-docker-<tag>`
+2. Starts a container with the datadir bind-mounted at `/var/lib/mysql`
+   and the database port exposed on `127.0.0.1:13307` (or override
+   with `MYBACKREST_E2E_PORT`)
+3. Creates a backup user (privileges branched per flavor: MariaDB
+   doesn't recognize `BACKUP_ADMIN`) and a test schema covering
+   InnoDB, MyISAM, CSV, and ARCHIVE engines
+4. Snapshots the data
+5. Runs `standalone-e2e-test` which drives `mysqlHotBackup` via TCP
+6. Stops container A
+7. Runs `standalone-e2e-restore-test` to lay out a fresh restored
+   datadir
+8. Starts container B against the restored datadir; InnoDB runs crash
+   recovery from the redo log we copied
+9. Snapshots data from container B; diffs against step 4
+
+Behavior knobs:
 
 ```sh
-# One-time setup:
-sudo apt-get install -y mysql-server libmariadb-dev
+# Keep work dir for inspection on failure
+MYBACKREST_E2E_KEEP=1 test/e2e/run-docker.sh mariadb 11.4
 
-# Build the test binary:
-meson setup build && meson compile -C build
+# Override the TCP port (container A uses PORT, container B uses PORT+1)
+MYBACKREST_E2E_PORT=23307 test/e2e/run-docker.sh mysql 8.4
 
-# Run the harness:
+# Accept the MariaDB prepared-XA limitation (see below) and pass the
+# test as long as the backup half succeeds
+MYBACKREST_E2E_ACCEPT_PREPARED_XA=1 test/e2e/run-docker.sh mariadb 11.4
+```
+
+Prereqs:
+
+- Docker (or compatible — OrbStack on macOS works) with a running
+  daemon
+- A `mariadb` or `mysql` client on PATH for the bootstrap (the harness
+  doesn't `docker exec` into the server for the schema setup)
+
+## run-mysql.sh — local-mysqld harness (legacy)
+
+```
 test/e2e/run-mysql.sh
 ```
 
-To keep the datadir + backup directory for inspection after a failure:
+Drives a private mysqld via socket against a `/tmp` datadir without
+touching the system `mysql.service`. Predates the Docker harness; the
+Docker variant is now the primary integration story. Kept because it
+runs ~3× faster than the Docker variant on a single flavor (no image
+pull, no container churn).
+
+Pick by what you have available:
+
+- Just want a fast smoke against whatever's apt-installed → `run-mysql.sh`
+- Want multi-flavor / multi-version coverage → `run-docker.sh`
+
+## MariaDB prepared-XA caveat
+
+On MariaDB the orchestrator can capture an on-disk state where InnoDB
+has an in-flight prepared XA transaction (typically from an internal
+binlog rotation that the bootstrap triggers). The restored server then
+refuses to start with "Found N prepared transactions! ... start with
+--tc-heuristic-recover ...".
+
+`mariabackup` avoids this by waiting at `BACKUP STAGE BLOCK_COMMIT`
+for in-flight 2PC operations to complete before snapshotting; the
+analog for our orchestrator's lock protocol is open work.
+
+For now, set `MYBACKREST_E2E_ACCEPT_PREPARED_XA=1` to mark the
+restore-verify stage as "skipped due to known limitation" and pass on
+the backup half. MySQL / Percona aren't affected — they bookend the
+2PC inside the standard recovery path.
+
+## Test binary
+
+`standalone-e2e-test` is environment-agnostic:
 
 ```sh
-MYBACKREST_E2E_KEEP=1 test/e2e/run-mysql.sh
+MYBACKREST_E2E_HOST=...      # OR MYBACKREST_E2E_SOCKET=...
+MYBACKREST_E2E_PORT=...
+MYBACKREST_E2E_DATADIR=...   # host path the orchestrator reads from
+MYBACKREST_E2E_BACKUP=...    # host path the backup writes into
+MYBACKREST_E2E_USER=...
+MYBACKREST_E2E_PASS=...
+build/src/standalone-e2e-test
 ```
 
-To pick a different port:
-
-```sh
-MYBACKREST_E2E_PORT=23307 test/e2e/run-mysql.sh
-```
-
-## Graduating to Docker
-
-The test binary `standalone-e2e-test` is environment-agnostic — it
-just connects to a socket and runs the orchestrator. To swap in a
-Docker matrix harness (Phase H):
-
-1. For each (flavor, version) tuple in the matrix
-   (`mysql:5.7/8.0/8.4`, `mariadb:10.4/10.5/10.11/11.4`,
-   `percona:5.7/8.0/8.4`):
-   - `docker run` the image with a mounted datadir
-   - Wait for the container's healthcheck
-   - Run the same SQL bootstrap appropriate for the flavor (the
-     current MySQL bootstrap uses `BACKUP_ADMIN` which doesn't exist
-     on MariaDB; the Docker harness will branch the GRANT per flavor)
-   - Run `standalone-e2e-test` against the container's socket
-   - `docker rm -f` on exit
-
-2. The test binary stays unchanged — vendor- and version-conditional
-   assertions inside the binary already handle the cross-flavor
-   differences in lock method, `auto.cnf` generation, etc.
-
-## Known limitations
-
-- Single flavor + single version (MySQL 8.0.x via apt). Catches some
-  integration bugs; misses cross-vendor wire-protocol drift.
-- Backup-only coverage. A future iteration will extend the harness
-  with a restore-into-fresh-datadir + start-mysqld-against-it loop to
-  end-to-end-verify the cold restore path.
+Vendor- and version-conditional assertions inside the binary handle
+cross-flavor differences (lock method autodetect, `auto.cnf` presence,
+SHOW BINARY LOG STATUS vs SHOW MASTER STATUS, etc.). Adding a new
+flavor to the matrix doesn't require recompiling.

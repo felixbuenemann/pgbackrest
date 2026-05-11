@@ -19,13 +19,20 @@ normally against the now-clean datadir.
 #define COMMAND_RESTORE_PREPARE_H
 
 #include "common/type/string.h"
+#include "mysql/client.h"
 #include "storage/storage.h"
 
-// Write mybackrest_recovery.cnf + mybackrest_recovery.sql into the restore datadir
-FN_EXTERN void prepareWriteRecoveryFiles(const Storage *restoreStorage, const String *restorePath, const String *mysqldPath);
+// Write mybackrest_recovery.cnf + mybackrest_recovery.sql into the restore datadir. When vendor is MariaDB, ALSO write
+// mybackrest_recovery_xa.cnf containing tc-heuristic-recover=COMMIT — that cnf is used for a one-shot pre-pass that
+// resolves any prepared XA transactions captured in the backup before the normal recovery cnf is invoked. (mariadbd
+// refuses to start with prepared XAs unless --tc-heuristic-recover is explicitly set, and that flag is itself one-shot.)
+// For MySQL/Percona/Unknown vendors only the main cnf + sql are written.
+FN_EXTERN void prepareWriteRecoveryFiles(
+    const Storage *restoreStorage, const String *restorePath, const String *mysqldPath, MysqlVendor vendor);
 
-// Spawn `<mysqldPath> --defaults-file=...` and wait for graceful exit; throws on non-zero exit
-FN_EXTERN void prepareInvokeMysqld(const String *mysqldPath, const String *restorePath);
+// Spawn `<mysqldPath> --defaults-file=...` and wait for graceful exit; throws on non-zero exit. For MariaDB this also
+// drives the XA pre-pass (one-shot mysqld run with --tc-heuristic-recover=COMMIT) before the normal recovery run.
+FN_EXTERN void prepareInvokeMysqld(const String *mysqldPath, const String *restorePath, MysqlVendor vendor);
 
 /***********************************************************************************************************************************
 Run the full restore-side compatibility check before letting mysqld touch the restored datadir.

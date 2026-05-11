@@ -140,7 +140,11 @@ mysqlColdRestore(
         // explicit; caller can chain prepareInvokeMysqld to actually run it.
         if (mysqldPath != NULL)
         {
-            prepareWriteRecoveryFiles(dstStorage, restorePath, mysqldPath);
+            // Pass the manifest's vendor so prepareWriteRecoveryFiles can emit the MariaDB-specific XA-pre-pass cnf
+            // alongside the main recovery cnf. Without that, restoring a MariaDB backup that captured an in-flight 2PC
+            // would leave mysqld unable to start — see Phase F design for the longer-term archive-push fix that lets the
+            // main recovery resolve via binlogs.
+            prepareWriteRecoveryFiles(dstStorage, restorePath, mysqldPath, manifest->info->vendor);
             result->recoveryFilesWritten = true;
         }
         else

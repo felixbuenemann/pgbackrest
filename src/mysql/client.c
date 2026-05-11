@@ -147,6 +147,18 @@ mysqlClientInitHandle(const TimeMSec timeoutMs, const bool allowOldPassword)
 
     mysql_optionsv(conn, MYSQL_OPT_CONNECT_ATTR_ADD, (const void *)"program_name", (const void *)PROJECT_BIN);
 
+    // Don't enforce TLS — connect plain when the server has no TLS configured (default for many docker images, e.g.
+    // mariadb:10.11 ships with have_ssl=DISABLED). mariadb-connector-c 3.4+ defaults to TLS-required AND server-cert-
+    // verify-required; both must be cleared to fall back to plain when the server doesn't offer SSL. Verified empirically
+    // against mariadb-connector-c 3.4.8: MYSQL_OPT_SSL_ENFORCE=0 alone is NOT sufficient — VERIFY_SERVER_CERT must also
+    // be 0. When the operator wants enforced TLS that's a future db-ssl-mode config knob; the default here matches
+    // pgBackRest's stance for libpq (no implicit TLS requirement on the client).
+    {
+        my_bool no = 0;
+        mysql_options(conn, MYSQL_OPT_SSL_ENFORCE, &no);
+        mysql_options(conn, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, &no);
+    }
+
     if (allowOldPassword)
     {
         // MYSQL_SECURE_AUTH defaults to true and refuses pre-4.1 hashes; disable it so legacy 5.5 servers (or any server with
