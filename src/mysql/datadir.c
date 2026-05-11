@@ -280,7 +280,7 @@ dataDirReadAutoCnf(const Storage *const storage, const String *const dataPath, M
 
 /***********************************************************************************************************************************
 Single page-0 read of the InnoDB system tablespace (ibdata1 or mysql.ibd). Feeds both the FSP-flag decode and the adaptive
-checksum probe — previously the probe re-opened the same file and read the same bytes a second time.
+checksum probe.
 ***********************************************************************************************************************************/
 static void
 dataDirProbeInnodb(

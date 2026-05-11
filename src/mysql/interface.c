@@ -577,10 +577,6 @@ mysqlPageChecksumValidate(
             //   c1 = crc32(page[FIL_PAGE_OFFSET..FIL_PAGE_FILE_FLUSH_LSN-1])      = bytes 4..25 (22 bytes)
             //   c2 = crc32(page[FIL_PAGE_DATA..pageSize-FIL_PAGE_END_LSN_OLD_CHKSUM-1]) = bytes 38..pageSize-9
             //   stored = c1 ^ c2
-            // EARLIER BUG: this code used FIL_PAGE_LSN - FIL_PAGE_OFFSET (= 12 bytes) for the first range, which is wrong.
-            // The correct upper bound is FIL_PAGE_FILE_FLUSH_LSN (= 26), giving 22 bytes — covers FIL_PAGE_OFFSET +
-            // FIL_PAGE_PREV + FIL_PAGE_NEXT + FIL_PAGE_LSN, skips FIL_PAGE_FILE_FLUSH_LSN + FIL_PAGE_SPACE_ID. Real InnoDB
-            // pages would have been spuriously rejected before this fix.
             const uint32_t c1 = (uint32_t)crc32(0, page + FIL_PAGE_OFFSET, FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET);
             const uint32_t c2 = (uint32_t)crc32(
                 0, page + FIL_PAGE_DATA, (uInt)(pageSize - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE));
