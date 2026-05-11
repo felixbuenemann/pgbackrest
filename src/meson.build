@@ -444,3 +444,10 @@ executable(
     src_common, src_mybackrest, files('../test/src/standalone/hotBackupTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
+
+executable(
+    'standalone-hot-backup-int-test',
+    src_common, src_mybackrest,
+    files('../test/src/standalone/hotBackupIntegrationTest.c', '../test/src/standalone/harnessMysql.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)

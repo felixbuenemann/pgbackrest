@@ -237,9 +237,14 @@ mysqlHotBackup(
             lockAcquired = true;
 
             // Step 5: capture START binlog position. We do this AFTER block-ddl so we have a consistent snapshot of the
-            // server state at the moment the lock took effect.
+            // server state at the moment the lock took effect. Run captureBinlog in the PRIOR context so the strings it
+            // strDup's land in the caller's mem context (above hotBackup's TEMP); otherwise they'd be freed at TEMP_END.
             LOG_INFO("hot backup: capturing start binlog position");
-            hotBackupCaptureBinlog(client, result->binlog, hotBackupCaptureStart);
+            MEM_CONTEXT_PRIOR_BEGIN()
+            {
+                hotBackupCaptureBinlog(client, result->binlog, hotBackupCaptureStart);
+            }
+            MEM_CONTEXT_PRIOR_END();
 
             // Step 6: engine handler dispatch. Same convention as cold mode: run every non-NULL callback in order.
             for (size_t i = 0; i < sizeof(hotBackupEngines) / sizeof(hotBackupEngines[0]); i++)
@@ -291,7 +296,11 @@ mysqlHotBackup(
             // Step 10: capture STOP binlog position. Should be == start position in practice (no commits happened during the
             // copy because BLOCK_DDL prevented new ones from committing) but we capture it anyway for the manifest.
             LOG_INFO("hot backup: capturing stop binlog position");
-            hotBackupCaptureBinlog(client, result->binlog, hotBackupCaptureStop);
+            MEM_CONTEXT_PRIOR_BEGIN()
+            {
+                hotBackupCaptureBinlog(client, result->binlog, hotBackupCaptureStop);
+            }
+            MEM_CONTEXT_PRIOR_END();
         }
         CATCH_ANY()
         {
