@@ -291,9 +291,7 @@ mysqlClientOpen(MysqlClient *const this)
 Encode one MYSQL_ROW value into the running pack
 ***********************************************************************************************************************************/
 static void
-mysqlClientPackValue(
-    PackWrite *const pack, const enum enum_field_types fieldType, const char *const value, const unsigned int columnIdx,
-    const String *const query)
+mysqlClientPackValue(PackWrite *const pack, const enum enum_field_types fieldType, const char *const value)
 {
     // NULL value: column is SQL NULL regardless of column type
     if (value == NULL)
@@ -322,8 +320,6 @@ mysqlClientPackValue(
             pckWriteStrP(pack, STR(value), .defaultWrite = true);
             return;
     }
-
-    (void)columnIdx; (void)query;                                       // reachable only via a future case that doesn't return
 }
 
 /**********************************************************************************************************************************/
@@ -399,7 +395,7 @@ mysqlClientQuery(MysqlClient *const this, const String *const query, const Mysql
 
                     (void)lengths;                                  // libmariadb's row values are NUL-terminated; STR() uses strlen
                     for (unsigned int columnIdx = 0; columnIdx < columnTotal; columnIdx++)
-                        mysqlClientPackValue(pack, fields[columnIdx].type, row[columnIdx], columnIdx, query);
+                        mysqlClientPackValue(pack, fields[columnIdx].type, row[columnIdx]);
 
                     if (resultType == mysqlClientQueryResultAny)
                         pckWriteArrayEndP(pack);
