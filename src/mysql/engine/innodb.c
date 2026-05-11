@@ -51,6 +51,8 @@ engineInnodbCopyOnline(EngineBackupCtx *const ctx)
         // backup-of-an-empty-or-pre-bootstrap-datadir case.
         const bool validate = ctx->innodbPageSize > 0 && ctx->innodbPageChecksum != mysqlPageChecksumNone;
 
+        uint64_t totalChecked = 0;
+        uint64_t totalValid = 0;
         uint64_t totalInvalid = 0;
         uint64_t totalSkipped = 0;
 
@@ -85,6 +87,8 @@ engineInnodbCopyOnline(EngineBackupCtx *const ctx)
                         "InnoDB: %s — %" PRIu64 " page(s) OK (%" PRIu64 " skipped)", strZ(path), s.pagesValid, s.pagesSkipped);
                 }
 
+                totalChecked += s.pagesChecked;
+                totalValid += s.pagesValid;
                 totalInvalid += s.pagesInvalid;
                 totalSkipped += s.pagesSkipped;
             }
@@ -98,6 +102,13 @@ engineInnodbCopyOnline(EngineBackupCtx *const ctx)
                 "InnoDB: page-checksum validation summary — %" PRIu64 " invalid, %" PRIu64 " skipped across %u file(s)",
                 totalInvalid, totalSkipped, copied);
         }
+
+        // Surface aggregate counts on the ctx so the orchestrator can record them on the backup result and the operator can
+        // decide whether to fail on non-zero invalid pages.
+        ctx->innodbPagesChecked = totalChecked;
+        ctx->innodbPagesValid = totalValid;
+        ctx->innodbPagesInvalid = totalInvalid;
+        ctx->innodbPagesSkipped = totalSkipped;
 
         tableSpaceIterFree(iter);
 

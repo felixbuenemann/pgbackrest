@@ -289,6 +289,13 @@ mysqlHotBackup(
                 result->enginesProcessed++;
             }
 
+            // Capture aggregate page-checksum counts from the InnoDB handler onto the result struct (innodb.c stashed them
+            // on ctx — see EngineBackupCtx)
+            result->innodbPagesChecked = ctx.innodbPagesChecked;
+            result->innodbPagesValid = ctx.innodbPagesValid;
+            result->innodbPagesInvalid = ctx.innodbPagesInvalid;
+            result->innodbPagesSkipped = ctx.innodbPagesSkipped;
+
             // Step 7: redo log files (cold copy is safe since writes are quiesced by the lock)
             if (info->hasInnodb)
                 result->redoFilesCopied = redoLogColdCopy(srcStorage, dataPath, dstStorage, backupPath);

@@ -143,6 +143,13 @@ mysqlColdBackup(
             result->enginesProcessed++;
         }
 
+        // Copy aggregate page-checksum counts the InnoDB handler stashed on ctx onto the result struct so callers can act on
+        // them (e.g. fail the backup when innodbPagesInvalid > 0).
+        result->innodbPagesChecked = ctx.innodbPagesChecked;
+        result->innodbPagesValid = ctx.innodbPagesValid;
+        result->innodbPagesInvalid = ctx.innodbPagesInvalid;
+        result->innodbPagesSkipped = ctx.innodbPagesSkipped;
+
         // Step 3: redo log files (cold copy)
         if (info->hasInnodb)
             result->redoFilesCopied = redoLogColdCopy(srcStorage, dataPath, dstStorage, backupPath);

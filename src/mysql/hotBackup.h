@@ -44,6 +44,12 @@ typedef struct MysqlHotBackupResult
     unsigned int redoFilesCopied;
     bool autoCnfCopied;
     bool manifestWritten;
+
+    // Page-checksum validation summary across every InnoDB file copied
+    uint64_t innodbPagesChecked;
+    uint64_t innodbPagesValid;
+    uint64_t innodbPagesInvalid;
+    uint64_t innodbPagesSkipped;
 } MysqlHotBackupResult;
 
 // Run a hot (online) backup. The MysqlClient must already be opened via mysqlClientOpen. lockPreference of

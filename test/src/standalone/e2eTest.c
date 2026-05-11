@@ -121,6 +121,15 @@ main(void)
         expect("info detected hasInnodb", result->info != NULL && result->info->hasInnodb);
         expect("info detected hasMyisam", result->info != NULL && result->info->hasMyisam);
         expect("at least one redo file copied", result->redoFilesCopied >= 1);
+
+        // Page-checksum validation — every page in the real running mysqld's tablespaces should validate. The InnoDB engine
+        // handler ran every .ibd / ibdata1 / mysql.ibd / undo_*.ibu through the page-checksum filter using the algorithm
+        // mysqlDataDirInspect detected.
+        printf("  INFO  InnoDB pages: checked=%lu valid=%lu invalid=%lu skipped=%lu\n",
+            (unsigned long)result->innodbPagesChecked, (unsigned long)result->innodbPagesValid,
+            (unsigned long)result->innodbPagesInvalid, (unsigned long)result->innodbPagesSkipped);
+        expect("InnoDB pages were checked (>0)", result->innodbPagesChecked > 0);
+        expect("InnoDB validation found 0 invalid pages", result->innodbPagesInvalid == 0);
         // auto.cnf is a MySQL/Percona convention — MariaDB doesn't create one (Galera uses grastate.dat instead).
         // Either presence or absence is correct depending on vendor; the orchestrator records autoCnfCopied accordingly.
         if (mysqlClientVendor(client) == mysqlVendorMariadb)

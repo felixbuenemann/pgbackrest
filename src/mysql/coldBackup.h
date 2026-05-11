@@ -29,6 +29,13 @@ typedef struct MysqlColdBackupResult
     unsigned int redoFilesCopied;                                       // From redoLogColdCopy
     bool autoCnfCopied;                                                 // True if auto.cnf existed and was copied
     bool manifestWritten;                                               // True iff the manifest landed on disk
+
+    // Page-checksum validation summary across every InnoDB file copied. innodbPagesInvalid > 0 means the source datadir
+    // contained corrupt pages — the backup was still written (faithful copy) but the operator should investigate.
+    uint64_t innodbPagesChecked;
+    uint64_t innodbPagesValid;
+    uint64_t innodbPagesInvalid;
+    uint64_t innodbPagesSkipped;
 } MysqlColdBackupResult;
 
 // Run a cold backup. dataPath must be the live datadir of a known-shut-down server; backupPath the empty (or

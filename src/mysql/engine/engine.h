@@ -65,6 +65,14 @@ typedef struct EngineBackupCtx
     // didn't detect them (in which case the InnoDB handler falls back to flat copy).
     MysqlPageSize innodbPageSize;
     MysqlPageChecksumAlgo innodbPageChecksum;
+
+    // Output: aggregate page-checksum counts across every InnoDB file copied during this backup. Written by the InnoDB
+    // engine handler when validation was enabled; read by the orchestrator after the handler returns. Stays zero in cold-
+    // backup fallback or when no InnoDB files exist.
+    uint64_t innodbPagesChecked;
+    uint64_t innodbPagesValid;
+    uint64_t innodbPagesInvalid;
+    uint64_t innodbPagesSkipped;
 } EngineBackupCtx;
 
 /***********************************************************************************************************************************
