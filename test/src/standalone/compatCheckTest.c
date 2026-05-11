@@ -82,6 +82,7 @@ main(void)
 
         mysqlBackupManifestWrite(storage, STRDEF("."), &info, NULL);
 
+
         // ---- Test 1: matching binary → passes silently ----
         const char *const mysqlOk = "/tmp/mybackrest-compat-test/fake-mysql-8.0.36";
         writeFakeMysqld(mysqlOk, "mysqld  Ver 8.0.36 for Linux on x86_64 (MySQL Community Server - GPL)");

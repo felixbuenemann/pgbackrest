@@ -447,6 +447,23 @@ main(void)
             infoGalera->galeraStateUuid != NULL &&
                 strEqZ(infoGalera->galeraStateUuid, "aaaa1111-bbbb-2222-cccc-333333333333"));
         expect("[Galera] seqno extracted", infoGalera->galeraSeqno == 987654321);
+        expect("[Galera] safe_to_bootstrap = 0 (must wait)", infoGalera->safeToBootstrap == 0);
+
+        // Edge case: a node where safe_to_bootstrap=1 (can bootstrap a fresh cluster)
+        rmrf(root); mkdirP(root);
+        writeMinimalIbdata1("/tmp/mybackrest-datadir-test/ibdata1");
+        FILE *fpGra2 = fopen("/tmp/mybackrest-datadir-test/grastate.dat", "w");
+        if (fpGra2 == NULL) THROW(FileWriteError, "fopen");
+        fprintf(fpGra2,
+            "# GALERA saved state\n"
+            "version: 2.1\n"
+            "uuid:    bbbb2222-cccc-3333-dddd-444444444444\n"
+            "seqno:   42\n"
+            "safe_to_bootstrap: 1\n");
+        fclose(fpGra2);
+
+        MysqlDataDirInfo *infoGalera2 = mysqlDataDirInspect(storage, STRDEF("."));
+        expect("[Galera safe=1] safe_to_bootstrap = 1 (can bootstrap)", infoGalera2->safeToBootstrap == 1);
 
         // ============================================================================================================================
         // Scenario 6f: human-readable summary

@@ -71,6 +71,9 @@ typedef struct MysqlDataDirInfo
     bool hasGalera;                                                     // grastate.dat OR gvwstate.dat present
     String *galeraStateUuid;                                            // From grastate.dat "uuid:" line (NULL if absent)
     int64_t galeraSeqno;                                                // From grastate.dat "seqno:" line (-1 if absent)
+    int safeToBootstrap;                                                // grastate.dat "safe_to_bootstrap:" — 0, 1, or -1 if missing
+                                                                        // 1 means this node can start a fresh cluster on its own;
+                                                                        // 0 means it must wait for a primary node first
 
     // Security / format flags surfaced from the system tablespace
     bool encrypted;                                                     // FSP_FLAGS_MASK_ENCRYPTION bit set — needs keyring at restore

@@ -153,9 +153,11 @@ mysqlBackupManifestRender(const MysqlDataDirInfo *const info, const MysqlBackupB
                 "\n[galera]\n"
                 "enabled = true\n"
                 "state_uuid = %s\n"
-                "seqno = %" PRId64 "\n",
+                "seqno = %" PRId64 "\n"
+                "safe_to_bootstrap = %d\n",
                 info->galeraStateUuid != NULL ? strZ(info->galeraStateUuid) : "",
-                info->galeraSeqno);
+                info->galeraSeqno,
+                info->safeToBootstrap);
         }
 
         if (binlog != NULL && binlog->startFile != NULL)
@@ -345,6 +347,7 @@ mysqlBackupManifestParse(const String *const text)
         const bool hasGaleraSection = lookupKv(kv, "galera", "enabled") != NULL;
         const String *const galeraUuidStr = lookupKv(kv, "galera", "state_uuid");
         const String *const galeraSeqnoStr = lookupKv(kv, "galera", "seqno");
+        const String *const galeraSafeStr = lookupKv(kv, "galera", "safe_to_bootstrap");
 
         const bool hasBinlogSection = lookupKv(kv, "binlog", "start_file") != NULL;
         const String *const binStartFile = lookupKv(kv, "binlog", "start_file");
@@ -390,6 +393,7 @@ mysqlBackupManifestParse(const String *const text)
             result->info->hasGalera = hasGaleraSection;
             result->info->galeraStateUuid = (galeraUuidStr != NULL && strSize(galeraUuidStr) > 0) ? strDup(galeraUuidStr) : NULL;
             result->info->galeraSeqno = galeraSeqnoStr != NULL ? (int64_t)cvtZToInt64(strZ(galeraSeqnoStr)) : -1;
+            result->info->safeToBootstrap = galeraSafeStr != NULL ? (int)cvtZToInt(strZ(galeraSafeStr)) : -1;
 
             if (hasBinlogSection)
             {
@@ -451,11 +455,12 @@ mysqlBackupManifestRead(const Storage *const storage, const String *const backup
 
         if (content != NULL)
         {
-            MysqlBackupManifestParsed *const parsed = mysqlBackupManifestParse(strNewBuf(content));
-
+            // Run Parse with the CALLER's context as its "prior" — otherwise the parsed result allocates inside this Read's
+            // temp scope and gets freed when TEMP_END fires. The MEM_CONTEXT_PRIOR_BEGIN here makes Read's prior the active
+            // context so Parse's own PRIOR_BEGIN points at the caller.
             MEM_CONTEXT_PRIOR_BEGIN()
             {
-                result = parsed;                                        // already in parent context per Parse()
+                result = mysqlBackupManifestParse(strNewBuf(content));
             }
             MEM_CONTEXT_PRIOR_END();
         }

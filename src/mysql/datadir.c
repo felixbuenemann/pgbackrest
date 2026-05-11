@@ -327,6 +327,7 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
         //   seqno:   12345
         //   safe_to_bootstrap: 0
         info->galeraSeqno = -1;
+        info->safeToBootstrap = -1;
         if (info->hasGalera)
         {
             TRY_BEGIN()
@@ -357,6 +358,11 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
                         {
                             const String *const seqStr = strTrim(strSubN(line, 6, strSize(line) - 6));
                             info->galeraSeqno = strtoll(strZ(seqStr), NULL, 10);
+                        }
+                        else if (strBeginsWithZ(line, "safe_to_bootstrap:"))
+                        {
+                            const String *const stbStr = strTrim(strSubN(line, 18, strSize(line) - 18));
+                            info->safeToBootstrap = (int)strtol(strZ(stbStr), NULL, 10);
                         }
                     }
                 }
@@ -513,9 +519,11 @@ mysqlDataDirSummarize(const MysqlDataDirInfo *const info)
         {
             strCatFmt(
                 out,
-                "Galera    cluster member; state-uuid: %s, last-seqno: %" PRId64 "\n",
+                "Galera    cluster member; state-uuid: %s, last-seqno: %" PRId64 ", safe-to-bootstrap: %s\n",
                 info->galeraStateUuid != NULL ? strZ(info->galeraStateUuid) : "(unknown)",
-                info->galeraSeqno);
+                info->galeraSeqno,
+                info->safeToBootstrap == 1 ? "YES (can bootstrap new cluster)" :
+                info->safeToBootstrap == 0 ? "no (must wait for primary node)" : "(unrecorded)");
         }
 
         MEM_CONTEXT_PRIOR_BEGIN()
