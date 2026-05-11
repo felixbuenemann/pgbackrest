@@ -9,8 +9,6 @@ Pages are built with a real CRC32 checksum (matching the algorithm in src/mysql/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <zlib.h>
-
 #include "common/debug.h"
 #include "common/error/error.h"
 #include "common/io/bufferRead.h"
@@ -21,6 +19,7 @@ Pages are built with a real CRC32 checksum (matching the algorithm in src/mysql/
 #include "common/log.h"
 #include "common/stackTrace.h"
 #include "common/type/buffer.h"
+#include "mysql/crc32c.h"
 #include "mysql/interface.h"
 #include "mysql/pageChecksumFilter.h"
 
@@ -46,8 +45,8 @@ stampValidPage(unsigned char *const page, const uint32_t pageNo)
     for (size_t i = FIL_PAGE_DATA; i < pageSize - FIL_PAGE_TRAILER_SIZE; i++)
         page[i] = (unsigned char)(((i + pageNo) * 7) & 0xFF);
 
-    const uint32_t c1 = (uint32_t)crc32(0, page + FIL_PAGE_OFFSET, FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET);
-    const uint32_t c2 = (uint32_t)crc32(0, page + FIL_PAGE_DATA, (uInt)(pageSize - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE));
+    const uint32_t c1 = mysqlCrc32c(0, page + FIL_PAGE_OFFSET, FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET);
+    const uint32_t c2 = mysqlCrc32c(0, page + FIL_PAGE_DATA, (size_t)(pageSize - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE));
     const uint32_t expected = c1 ^ c2;
 
     page[0] = (unsigned char)((expected >> 24) & 0xFF);

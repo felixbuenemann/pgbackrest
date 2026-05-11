@@ -17,6 +17,7 @@ provide via the test harness in test/data/mysql/.
 #include "common/log.h"
 #include "common/type/buffer.h"
 #include "common/type/string.h"
+#include "mysql/crc32c.h"
 #include "mysql/interface.h"
 #include "storage/storage.h"
 
@@ -553,6 +554,22 @@ mysqlPageChecksumValidate(
     ASSERT(page != NULL);
     ASSERT(pageSize > 0);
 
+    // All-zero page check (xtrabackup's xb_page_is_empty / mariabackup equivalent): an InnoDB tablespace contains
+    // uninitialized / freed / not-yet-flushed pages whose every byte is zero. mysqld treats those as valid (allocated but no
+    // data) and rewrites them as needed; the validator must accept them too or it would report most of an idle tablespace as
+    // corrupt.
+    //
+    // Look at the FIL_PAGE_LSN field (8 bytes at offset 16): when LSN is zero AND the stored checksum field is zero, the
+    // page hasn't been written yet. The all-zero condition is checked CHEAPLY by spot-checking key fields rather than
+    // scanning the entire page (which can be 64 KiB).
+    if (mysqlReadU32Be(page) == 0 &&
+        mysqlReadU32Be(page + FIL_PAGE_OFFSET) == 0 &&
+        mysqlReadU32Be(page + FIL_PAGE_LSN) == 0 &&
+        mysqlReadU32Be(page + FIL_PAGE_LSN + 4) == 0)
+    {
+        FUNCTION_TEST_RETURN(BOOL, true);
+    }
+
     // The trailer's LSN low half should match FIL_PAGE_LSN's low half — that's a torn-page detector. If they don't match, the
     // page is torn and recovery (not us) will deal with it; we report invalid here so the upstream filter can re-read the page.
     const size_t trailerOffset = (size_t)pageSize - FIL_PAGE_TRAILER_SIZE;
@@ -572,21 +589,28 @@ mysqlPageChecksumValidate(
         case mysqlPageChecksumCrc32:
         case mysqlPageChecksumStrictCrc32:
         {
+            // BUF_NO_CHECKSUM_MAGIC at offset 0 means the page was written with innodb_checksum_algorithm=none historically.
+            // mysqld accepts these even when the current algorithm is crc32; we do too.
+            if (mysqlReadU32Be(page) == 0xDEADBEEFu)
+                FUNCTION_TEST_RETURN(BOOL, true);
+
             // Per buf_calc_page_crc32() in mysql-server/storage/innobase/buf/checksum.cc:
             //   c1 = crc32(page[FIL_PAGE_OFFSET..FIL_PAGE_FILE_FLUSH_LSN-1])      = bytes 4..25 (22 bytes)
             //   c2 = crc32(page[FIL_PAGE_DATA..pageSize-FIL_PAGE_END_LSN_OLD_CHKSUM-1]) = bytes 38..pageSize-9
             //   stored = c1 ^ c2
-            const uint32_t c1 = (uint32_t)crc32(0, page + FIL_PAGE_OFFSET, FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET);
-            const uint32_t c2 = (uint32_t)crc32(
-                0, page + FIL_PAGE_DATA, (uInt)(pageSize - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE));
+            // InnoDB's "CRC32" is the CRC-32C (Castagnoli) variant, NOT zlib's IEEE crc32 — see src/mysql/crc32c.c for the
+            // table-driven software implementation.
+            const uint32_t c1 = mysqlCrc32c(0, page + FIL_PAGE_OFFSET, FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET);
+            const uint32_t c2 = mysqlCrc32c(
+                0, page + FIL_PAGE_DATA, (size_t)(pageSize - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE));
 
             FUNCTION_TEST_RETURN(BOOL, mysqlReadU32Be(page) == (c1 ^ c2));
         }
 
         case mysqlPageChecksumFullCrc32:
         {
-            // MariaDB 10.5+: single CRC32 over page[0..pageSize-5], compared to last 4 bytes (big-endian).
-            const uint32_t expected = (uint32_t)crc32(0, page, (uInt)(pageSize - 4));
+            // MariaDB 10.5+ full_crc32: single CRC-32C over page[0..pageSize-5], compared to last 4 bytes (big-endian).
+            const uint32_t expected = mysqlCrc32c(0, page, (size_t)(pageSize - 4));
             FUNCTION_TEST_RETURN(BOOL, mysqlReadU32Be(page + pageSize - 4) == expected);
         }
 

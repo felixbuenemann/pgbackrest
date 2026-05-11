@@ -11,13 +11,13 @@ all of them, validates every page, and reports aggregate counts + the corrupt-fi
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <zlib.h>
 
 #include "common/debug.h"
 #include "common/error/error.h"
 #include "common/log.h"
 #include "common/stackTrace.h"
 #include "common/type/stringList.h"
+#include "mysql/crc32c.h"
 #include "mysql/interface.h"
 #include "mysql/verify.h"
 #include "storage/posix/storage.h"
@@ -64,8 +64,8 @@ stampValidPage(unsigned char *const page, const uint32_t pageNo)
     if (pageNo == 0)
         memset(page + FIL_PAGE_DATA, 0, 24);                            // zero FSP header bytes for page 0
 
-    const uint32_t c1 = (uint32_t)crc32(0, page + FIL_PAGE_OFFSET, FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET);
-    const uint32_t c2 = (uint32_t)crc32(0, page + FIL_PAGE_DATA, (uInt)(pageSize - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE));
+    const uint32_t c1 = mysqlCrc32c(0, page + FIL_PAGE_OFFSET, FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET);
+    const uint32_t c2 = mysqlCrc32c(0, page + FIL_PAGE_DATA, (size_t)(pageSize - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE));
     const uint32_t expected = c1 ^ c2;
 
     page[0] = (unsigned char)((expected >> 24) & 0xFF);

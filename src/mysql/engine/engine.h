@@ -51,12 +51,20 @@ typedef enum
 /***********************************************************************************************************************************
 Backup-context handle passed to every engine callback
 ***********************************************************************************************************************************/
+#include "mysql/interface.h"
+
 typedef struct EngineBackupCtx
 {
     MysqlClient *client;                                                // Live connection (for engine-specific SQL)
     const String *dataPath;                                             // Source datadir
     const String *backupPath;                                           // Destination
     unsigned int processMax;                                            // From --process-max
+
+    // InnoDB validation hints, populated by the orchestrator from mysqlDataDirInspect. Used by the InnoDB engine handler to
+    // stream every .ibd / ibdata1 / mysql.ibd / undo_*.ibu through the page-checksum filter; left zero if the orchestrator
+    // didn't detect them (in which case the InnoDB handler falls back to flat copy).
+    MysqlPageSize innodbPageSize;
+    MysqlPageChecksumAlgo innodbPageChecksum;
 } EngineBackupCtx;
 
 /***********************************************************************************************************************************

@@ -234,6 +234,8 @@ mysqlHotBackup(
             .dataPath = absoluteDataPath,
             .backupPath = absoluteBackupPath,
             .processMax = 1,
+            .innodbPageSize = info->pageSize,
+            .innodbPageChecksum = info->pageChecksum,
         };
 
         // Wrap the lock/copy section in a TRY so any failure goes through best-effort UNLOCK before propagating

@@ -106,6 +106,8 @@ mysqlColdBackup(
             .dataPath = absoluteDataPath,
             .backupPath = absoluteBackupPath,
             .processMax = 1,
+            .innodbPageSize = info->pageSize,
+            .innodbPageChecksum = info->pageChecksum,
         };
 
         for (size_t i = 0; i < sizeof(coldBackupEngines) / sizeof(coldBackupEngines[0]); i++)

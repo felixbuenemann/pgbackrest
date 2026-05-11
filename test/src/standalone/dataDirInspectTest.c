@@ -14,13 +14,14 @@ inspector says "5.7" based on the absence of mysql.ibd, regardless of what binar
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <zlib.h>
 
 #include "common/debug.h"
 #include "common/error/error.h"
 #include "common/log.h"
 #include "common/stackTrace.h"
+#include "mysql/crc32c.h"
 #include "mysql/datadir.h"
+#include "mysql/interface.h"
 #include "storage/posix/storage.h"
 
 static int testFailures = 0;
@@ -351,12 +352,13 @@ main(void)
         for (size_t i = 58; i < 16384 - 8; i++)
             crc32Page[i] = (unsigned char)((i * 11) & 0xFF);
 
-        // Compute InnoDB CRC32: c1 = crc32(page[4..25] = 22 bytes), c2 = crc32(page[38..16375]). Matches the canonical
-        // buf_calc_page_crc32() in mysql-server/storage/innobase/buf/checksum.cc.
-        const uint32_t c1 = (uint32_t)crc32(0L, (const Bytef *)(crc32Page + FIL_PAGE_OFFSET),
-                                            FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET);
-        const uint32_t c2 = (uint32_t)crc32(0L, (const Bytef *)(crc32Page + FIL_PAGE_DATA),
-                                            16384 - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE);
+        // Compute InnoDB CRC-32C: c1 = crc32c(page[4..25] = 22 bytes), c2 = crc32c(page[38..16375]). Matches the canonical
+        // buf_calc_page_crc32() in mysql-server/storage/innobase/buf/checksum.cc — note this is the Castagnoli polynomial
+        // (0x82F63B78 reversed), NOT IEEE 802.3 which is what zlib's crc32() implements.
+        const uint32_t c1 = mysqlCrc32c(0, crc32Page + FIL_PAGE_OFFSET,
+                                        FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET);
+        const uint32_t c2 = mysqlCrc32c(0, crc32Page + FIL_PAGE_DATA,
+                                        16384 - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE);
         const uint32_t expected = c1 ^ c2;
         crc32Page[0] = (unsigned char)((expected >> 24) & 0xFF);
         crc32Page[1] = (unsigned char)((expected >> 16) & 0xFF);

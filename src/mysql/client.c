@@ -427,7 +427,9 @@ mysqlClientToLog(const MysqlClient *const this, StringStatic *const debugLog)
         FUNCTION_LOG_OBJECT_FORMAT(mysqlClientHost(this), strToLog, strStcRemains(debugLog), strStcRemainsSize(debugLog)));
 
     strStcCat(debugLog, ", database: ");
-    strToLog(mysqlClientDatabase(this), debugLog);
+    strStcResultSizeInc(
+        debugLog,
+        FUNCTION_LOG_OBJECT_FORMAT(mysqlClientDatabase(this), strToLog, strStcRemains(debugLog), strStcRemainsSize(debugLog)));
 
     strStcCat(debugLog, ", user: ");
     strStcResultSizeInc(

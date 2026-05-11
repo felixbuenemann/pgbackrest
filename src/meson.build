@@ -244,6 +244,7 @@ src_mybackrest = [
     'mysql/binlog.c',
     'mysql/client.c',
     'mysql/coldBackup.c',
+    'mysql/crc32c.c',
     'mysql/coldRestore.c',
     'mysql/datadir.c',
     'mysql/engine/archive.c',
