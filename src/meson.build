@@ -256,6 +256,7 @@ src_mybackrest = [
     'mysql/interface.c',
     'mysql/lock.c',
     'mysql/manifest.c',
+    'mysql/pageValidate.c',
     'mysql/sanity.c',
     'postgres/client.c',
     'postgres/interface.c',
@@ -421,5 +422,11 @@ executable(
 executable(
     'standalone-cold-restore-test',
     src_common, src_mybackrest, files('../test/src/standalone/coldRestoreTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+executable(
+    'standalone-page-validate-test',
+    src_common, src_mybackrest, files('../test/src/standalone/pageValidateTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
