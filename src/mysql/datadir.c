@@ -296,6 +296,11 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
                     info->versionExact = true;
                 }
 
+                // Surface the LOG_HEADER_FORMAT field (and the MariaDB encryption-bit) so the manifest can record exact
+                // redo-log format compatibility info for the restore-side check.
+                info->redoFormatNum = creator.formatNum;
+                info->encryptedRedo = creator.encryptedRedo;
+
                 if (creator.vendor != mysqlVendorUnknown)
                 {
                     // Override vendor only if filesystem heuristic didn't already pin us to MariaDB or Percona via

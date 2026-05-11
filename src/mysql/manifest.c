@@ -108,6 +108,8 @@ mysqlBackupManifestRender(const MysqlDataDirInfo *const info, const MysqlBackupB
             "page_size = %u\n"
             "page_checksum = %s\n"
             "redo_layout = %s\n"
+            "redo_format_num = %u\n"
+            "encrypted_redo = %s\n"
             "antelope = %s\n"
             "zip_ssize = %u\n"
             "encrypted = %s\n"
@@ -131,6 +133,8 @@ mysqlBackupManifestRender(const MysqlDataDirInfo *const info, const MysqlBackupB
             (unsigned int)info->pageSize,
             manifestChecksumName(info->pageChecksum),
             manifestRedoLayoutName(info->redoLayout),
+            info->redoFormatNum,
+            info->encryptedRedo ? "true" : "false",
             info->antelope ? "true" : "false",
             info->zipSsize,
             info->encrypted ? "true" : "false",
@@ -331,6 +335,8 @@ mysqlBackupManifestParse(const String *const text)
         const String *const pageSizeStr = lookupKv(kv, "datadir", "page_size");
         const String *const checksumStr = lookupKv(kv, "datadir", "page_checksum");
         const String *const redoLayoutStr = lookupKv(kv, "datadir", "redo_layout");
+        const String *const redoFormatNumStr = lookupKv(kv, "datadir", "redo_format_num");
+        const String *const encryptedRedoStr = lookupKv(kv, "datadir", "encrypted_redo");
         const String *const antelopeStr = lookupKv(kv, "datadir", "antelope");
         const String *const zipSsizeStr = lookupKv(kv, "datadir", "zip_ssize");
         const String *const encryptedStr = lookupKv(kv, "datadir", "encrypted");
@@ -366,6 +372,8 @@ mysqlBackupManifestParse(const String *const text)
             result->info->pageSize = pageSizeStr != NULL ? (MysqlPageSize)cvtZToUInt(strZ(pageSizeStr)) : 0;
             result->info->pageChecksum = parseChecksum(checksumStr);
             result->info->redoLayout = parseRedoLayout(redoLayoutStr);
+            result->info->redoFormatNum = redoFormatNumStr != NULL ? cvtZToUInt(strZ(redoFormatNumStr)) : 0;
+            result->info->encryptedRedo = parseBool(encryptedRedoStr);
             result->info->antelope = parseBool(antelopeStr);
             result->info->zipSsize = zipSsizeStr != NULL ? cvtZToUInt(strZ(zipSsizeStr)) : 0;
             result->info->encrypted = parseBool(encryptedStr);

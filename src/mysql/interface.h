@@ -218,7 +218,44 @@ typedef struct MysqlRedoCreator
     MysqlVendor vendor;                                                 // Detected from the prefix
     unsigned int versionNum;                                            // Parsed X.Y.Z, packed as MAJOR*10000+MINOR*100+PATCH
     String *raw;                                                        // The full creator string for logging
+    uint32_t formatNum;                                                 // LOG_HEADER_FORMAT field at offset 0 of the redo header
+    bool encryptedRedo;                                                 // True if MariaDB FORMAT_ENCRYPTED high bit was set
 } MysqlRedoCreator;
+
+/***********************************************************************************************************************************
+LOG_HEADER_FORMAT values, from cloned upstream sources.
+
+MySQL (mysql-server/storage/innobase/include/log0types.h enum class Log_format):
+  0     LEGACY (pre-5.7.9)
+  1     VERSION_5_7_9
+  2     VERSION_8_0_1
+  3     VERSION_8_0_3
+  4     VERSION_8_0_19
+  5     VERSION_8_0_28
+  6     VERSION_8_0_30           (← introduces the dynamic #innodb_redo/ layout; current for 8.0.30 .. 8.4)
+
+MariaDB (mariadb-server/storage/innobase/include/log0log.h):
+  1            FORMAT_10_2
+  103          FORMAT_10_3
+  104          FORMAT_10_4
+  0x50485953   FORMAT_10_5   ("PHYS" ASCII)
+  0x50687973   FORMAT_10_8   ("Phys" ASCII)
+  high-bit set FORMAT_ENC_*  (encrypted redo log, 10.5+)
+***********************************************************************************************************************************/
+#define MYSQL_REDO_FORMAT_LEGACY                                    0
+#define MYSQL_REDO_FORMAT_5_7_9                                     1
+#define MYSQL_REDO_FORMAT_8_0_1                                     2
+#define MYSQL_REDO_FORMAT_8_0_3                                     3
+#define MYSQL_REDO_FORMAT_8_0_19                                    4
+#define MYSQL_REDO_FORMAT_8_0_28                                    5
+#define MYSQL_REDO_FORMAT_8_0_30                                    6
+
+#define MARIADB_REDO_FORMAT_10_2                                    1
+#define MARIADB_REDO_FORMAT_10_3                                    103
+#define MARIADB_REDO_FORMAT_10_4                                    104
+#define MARIADB_REDO_FORMAT_10_5                                    0x50485953U     // "PHYS"
+#define MARIADB_REDO_FORMAT_10_8                                    0x50687973U     // "Phys"
+#define MARIADB_REDO_FORMAT_ENCRYPTED_BIT                           0x80000000U     // high bit toggles ENC variants
 
 // Read the LOG_HEADER_CREATOR string out of the redo log files under dataPath. Returns all-zero / NULL fields if no redo log
 // can be located (server has never run, or 8.0.30+ datadir with the dir not yet populated).

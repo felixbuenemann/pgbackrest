@@ -53,6 +53,8 @@ typedef struct MysqlDataDirInfo
     // InnoDB layout
     MysqlPageSize pageSize;                                             // 0 if no InnoDB tablespace found
     MysqlRedoLayout redoLayout;                                         // mysqlRedoLayoutUnknown if no redo dir/files
+    uint32_t redoFormatNum;                                             // LOG_HEADER_FORMAT raw value (0 if not detected)
+    bool encryptedRedo;                                                 // MariaDB FORMAT_ENCRYPTED bit set on the redo log
 
     // Engine presence flags — drive which handlers the cold-backup orchestrator runs
     bool hasInnodb;                                                     // any *.ibd / ibdata* / mysql.ibd

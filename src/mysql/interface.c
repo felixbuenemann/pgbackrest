@@ -371,7 +371,7 @@ mysqlRedoCreatorRead(const Storage *const storage, const String *const dataPath)
     ASSERT(storage != NULL);
     ASSERT(dataPath != NULL);
 
-    MysqlRedoCreator result = {.vendor = mysqlVendorUnknown, .versionNum = 0, .raw = NULL};
+    MysqlRedoCreator result = {.vendor = mysqlVendorUnknown, .versionNum = 0, .raw = NULL, .formatNum = 0, .encryptedRedo = false};
 
     MEM_CONTEXT_TEMP_BEGIN()
     {
@@ -379,14 +379,21 @@ mysqlRedoCreatorRead(const Storage *const storage, const String *const dataPath)
 
         if (redoPath != NULL)
         {
-            // LOG_HEADER_CREATOR is at offset 16, max 32 bytes (matches both MySQL and MariaDB layout). Read 64 bytes total
-            // so we comfortably cover the field plus its NUL terminator.
+            // LOG_HEADER_FORMAT is at offset 0 (4 bytes BE), LOG_HEADER_CREATOR at offset 16 (max 32 bytes NUL-term). Read 64
+            // bytes total to comfortably cover both. The format field disambiguates 8.0.0 from 8.0.30 + MariaDB 10.5 from 10.8
+            // when the creator string is missing or truncated.
             Buffer *const header = storageGetP(
                 storageNewReadP(storage, redoPath, .limit = VARUINT64(64)));
 
             if (header != NULL && bufUsed(header) >= 48)
             {
                 const unsigned char *const data = bufPtrConst(header);
+
+                // Format number — big-endian uint32 at offset 0
+                const uint32_t rawFormat = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
+                                           ((uint32_t)data[2] << 8) | (uint32_t)data[3];
+                result.formatNum = rawFormat & ~MARIADB_REDO_FORMAT_ENCRYPTED_BIT;
+                result.encryptedRedo = (rawFormat & MARIADB_REDO_FORMAT_ENCRYPTED_BIT) != 0;
 
                 // The field is NUL-terminated within its 32-byte slot. Find the NUL or hit the slot boundary.
                 char creator[33];
@@ -482,8 +489,10 @@ mysqlRedoCreatorToLog(const MysqlRedoCreator *const this, StringStatic *const de
     }
 
     strStcFmt(
-        debugLog, "{vendor: %u, versionNum: %u, raw: %s}",
-        (unsigned int)this->vendor, this->versionNum, this->raw != NULL ? strZ(this->raw) : "(null)");
+        debugLog, "{vendor: %u, versionNum: %u, formatNum: 0x%08x, encryptedRedo: %s, raw: %s}",
+        (unsigned int)this->vendor, this->versionNum, this->formatNum,
+        this->encryptedRedo ? "true" : "false",
+        this->raw != NULL ? strZ(this->raw) : "(null)");
 }
 
 /**********************************************************************************************************************************/

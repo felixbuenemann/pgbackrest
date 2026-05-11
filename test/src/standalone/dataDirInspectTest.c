@@ -88,6 +88,32 @@ writeRedoWithCreator(const char *const path, const char *const creator)
     fclose(fp);
 }
 
+/***********************************************************************************************************************************
+Build a redo log file with explicit LOG_HEADER_FORMAT (offset 0..3 BE) + creator.
+***********************************************************************************************************************************/
+static void
+writeRedoWithFormat(const char *const path, const uint32_t formatRaw, const char *const creator)
+{
+    unsigned char header[64];
+    memset(header, 0, sizeof(header));
+
+    header[0] = (unsigned char)((formatRaw >> 24) & 0xFF);
+    header[1] = (unsigned char)((formatRaw >> 16) & 0xFF);
+    header[2] = (unsigned char)((formatRaw >> 8) & 0xFF);
+    header[3] = (unsigned char)(formatRaw & 0xFF);
+
+    if (creator != NULL)
+    {
+        const size_t creatorLen = strlen(creator);
+        memcpy(header + 16, creator, creatorLen < 32 ? creatorLen : 31);
+    }
+
+    FILE *const fp = fopen(path, "wb");
+    if (fp == NULL) THROW_FMT(FileWriteError, "fopen(%s)", path);
+    fwrite(header, 1, sizeof(header), fp);
+    fclose(fp);
+}
+
 /**********************************************************************************************************************************/
 int
 main(void)
@@ -344,6 +370,55 @@ main(void)
 
         MysqlDataDirInfo *infoProbe = mysqlDataDirInspect(storage, STRDEF("."));
         expect("[probe] inspector detected CRC32 algorithm from page 0", infoProbe->pageChecksum == mysqlPageChecksumCrc32);
+
+        // ============================================================================================================================
+        // Scenario 6e1: LOG_HEADER_FORMAT exact-version detection (8.0.30 vs 8.0.0 vs MariaDB 10.5)
+        // ============================================================================================================================
+
+        // MySQL 8.0.30 — format = 6 (current MySQL VERSION_8_0_30)
+        rmrf(root);
+        mkdirP(root);
+        writeMinimalIbdata1("/tmp/mybackrest-datadir-test/ibdata1");
+        writeRedoWithFormat("/tmp/mybackrest-datadir-test/ib_logfile0", 6, "MySQL 8.0.36");
+
+        MysqlDataDirInfo *info830 = mysqlDataDirInspect(storage, STRDEF("."));
+        expect("[fmt 6] redoFormatNum == 6 (MySQL 8.0.30+)", info830->redoFormatNum == 6);
+        expect("[fmt 6] encryptedRedo = false", !info830->encryptedRedo);
+
+        // MySQL 5.7.9 — format = 1
+        rmrf(root); mkdirP(root);
+        writeMinimalIbdata1("/tmp/mybackrest-datadir-test/ibdata1");
+        writeRedoWithFormat("/tmp/mybackrest-datadir-test/ib_logfile0", 1, "MySQL 5.7.42");
+
+        MysqlDataDirInfo *info579 = mysqlDataDirInspect(storage, STRDEF("."));
+        expect("[fmt 1] redoFormatNum == 1 (MySQL 5.7.9)", info579->redoFormatNum == 1);
+
+        // MariaDB 10.5 — format = 0x50485953 ("PHYS")
+        rmrf(root); mkdirP(root);
+        writeMinimalIbdata1("/tmp/mybackrest-datadir-test/ibdata1");
+        writeRedoWithFormat("/tmp/mybackrest-datadir-test/ib_logfile0", 0x50485953U, "MariaDB 10.5.20");
+
+        MysqlDataDirInfo *info105 = mysqlDataDirInspect(storage, STRDEF("."));
+        expect("[fmt PHYS] redoFormatNum == 0x50485953", info105->redoFormatNum == 0x50485953U);
+        expect("[fmt PHYS] encryptedRedo = false", !info105->encryptedRedo);
+
+        // MariaDB 10.5 ENCRYPTED — format = 0x50485953 | 0x80000000
+        rmrf(root); mkdirP(root);
+        writeMinimalIbdata1("/tmp/mybackrest-datadir-test/ibdata1");
+        writeRedoWithFormat(
+            "/tmp/mybackrest-datadir-test/ib_logfile0", 0x50485953U | 0x80000000U, "MariaDB 10.5.20");
+
+        MysqlDataDirInfo *info105enc = mysqlDataDirInspect(storage, STRDEF("."));
+        expect("[fmt ENC PHYS] high bit stripped → formatNum = 0x50485953", info105enc->redoFormatNum == 0x50485953U);
+        expect("[fmt ENC PHYS] encryptedRedo = true", info105enc->encryptedRedo);
+
+        // MariaDB 10.8 — format = 0x50687973 ("Phys")
+        rmrf(root); mkdirP(root);
+        writeMinimalIbdata1("/tmp/mybackrest-datadir-test/ibdata1");
+        writeRedoWithFormat("/tmp/mybackrest-datadir-test/ib_logfile0", 0x50687973U, "MariaDB 10.8.0");
+
+        MysqlDataDirInfo *info108 = mysqlDataDirInspect(storage, STRDEF("."));
+        expect("[fmt Phys] redoFormatNum == 0x50687973", info108->redoFormatNum == 0x50687973U);
 
         // ============================================================================================================================
         // Scenario 6e: Galera cluster state files — grastate.dat / gvwstate.dat present
