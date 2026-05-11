@@ -263,6 +263,7 @@ src_mybackrest = [
     'mysql/lock.c',
     'mysql/manifest.c',
     'mysql/miscFiles.c',
+    'mysql/pageChecksumFilter.c',
     'mysql/pageValidate.c',
     'mysql/sanity.c',
     'mysql/verify.c',
@@ -473,6 +474,9 @@ executable('standalone-connect-engine-test',
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false)
 executable('standalone-mroonga-engine-test',
     src_common, src_mybackrest, files('../test/src/standalone/mroongaEngineTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false)
+executable('standalone-page-checksum-filter-test',
+    src_common, src_mybackrest, files('../test/src/standalone/pageChecksumFilterTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false)
 
 # End-to-end test against a real MySQL/MariaDB/Percona instance — driven by test/e2e/run-mysql.sh which boots a private mysqld
