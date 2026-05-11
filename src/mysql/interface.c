@@ -422,8 +422,7 @@ mysqlRedoCreatorRead(const Storage *const storage, const String *const dataPath)
                 const unsigned char *const data = bufPtrConst(header);
 
                 // Format number — big-endian uint32 at offset 0
-                const uint32_t rawFormat = ((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
-                                           ((uint32_t)data[2] << 8) | (uint32_t)data[3];
+                const uint32_t rawFormat = mysqlReadU32Be(data);
                 result.formatNum = rawFormat & ~MARIADB_REDO_FORMAT_ENCRYPTED_BIT;
                 result.encryptedRedo = (rawFormat & MARIADB_REDO_FORMAT_ENCRYPTED_BIT) != 0;
 
