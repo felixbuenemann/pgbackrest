@@ -88,6 +88,9 @@ main(void)
             c = makeFakeClient(mysqlVendorMysql, 40031);
             expect("MySQL 4.0.31 → ftwrl (auto-retry handles old password)", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodFtwrl);
 
+            c = makeFakeClient(mysqlVendorMysql, 32358);
+            expect("MySQL 3.23.58 → ftwrl (first InnoDB+MyISAM+binlog release)", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodFtwrl);
+
             c = makeFakeClient(mysqlVendorPercona, 80016);
             expect("Percona 8.0.16 → instance", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodInstance);
 
