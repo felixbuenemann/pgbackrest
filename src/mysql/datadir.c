@@ -93,6 +93,79 @@ dataDirReadGalera(const Storage *const storage, const String *const dataPath, My
 }
 
 /***********************************************************************************************************************************
+Read <dataPath>/auto.cnf for the server UUID. Allocates the result string in the parent context (the caller's info struct lives
+there). Silently tolerates a missing or malformed file.
+***********************************************************************************************************************************/
+static void
+dataDirReadAutoCnf(const Storage *const storage, const String *const dataPath, MysqlDataDirInfo *const info)
+{
+    TRY_BEGIN()
+    {
+        String *const uuid = mysqlAutoCnfReadUuid(storage, dataPath);
+
+        if (uuid != NULL)
+        {
+            MEM_CONTEXT_PRIOR_BEGIN()
+            {
+                info->serverUuid = strDup(uuid);
+            }
+            MEM_CONTEXT_PRIOR_END();
+        }
+    }
+    CATCH_ANY()
+    {
+        LOG_DETAIL_FMT("auto.cnf inspection failed: %s", errorMessage());
+    }
+    TRY_END();
+}
+
+/***********************************************************************************************************************************
+Single page-0 read of the InnoDB system tablespace (ibdata1 or mysql.ibd). Feeds both the FSP-flag decode and the adaptive
+checksum probe — previously the probe re-opened the same file and read the same bytes a second time.
+***********************************************************************************************************************************/
+static void
+dataDirProbeInnodb(
+    const Storage *const storage, const String *const dataPath, const bool sawIbdata, const bool sawMysqlIbd,
+    MysqlDataDirInfo *const info)
+{
+    TRY_BEGIN()
+    {
+        const String *const probePath =
+            sawIbdata
+                ? strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_IBDATA1)
+                : strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_MYSQL_IBD);
+
+        Buffer *const page0 = storageGetP(
+            storageNewReadP(storage, probePath, .limit = VARUINT64(mysqlPageSize64K)));
+
+        MysqlControl ctl = mysqlControlFromPage0(bufPtrConst(page0), bufUsed(page0), sawMysqlIbd);
+
+        info->pageSize = ctl.pageSize;
+        info->encrypted = ctl.encrypted;
+        info->pageChecksum = ctl.pageChecksum;                              // Either FullCrc32 (definitive) or None (probe below)
+        info->antelope = ctl.antelope;
+        info->zipSsize = ctl.zipSsize;
+        mysqlDataDirRaiseVersion(info, ctl.versionNum);
+
+        // Adaptive checksum probe — runs on the SAME buffer we just decoded the FSP header from. Skipped if FCRC32_MARKER
+        // already pinned the algorithm above.
+        if (info->pageChecksum == mysqlPageChecksumNone && info->pageSize > 0 && bufUsed(page0) >= info->pageSize)
+        {
+            const MysqlPageChecksumAlgo detected =
+                mysqlPageChecksumValidateAdaptive(bufPtrConst(page0), info->pageSize, /*pageNo*/ 0);
+
+            if (detected != mysqlPageChecksumNone)
+                info->pageChecksum = detected;
+        }
+    }
+    CATCH_ANY()
+    {
+        LOG_DETAIL_FMT("ibdata1 inspection failed: %s", errorMessage());
+    }
+    TRY_END();
+}
+
+/***********************************************************************************************************************************
 Refine info from the InnoDB redo log header's LOG_HEADER_CREATOR string + LOG_HEADER_FORMAT field. The creator string ("MySQL
 X.Y.Z" / "MariaDB X.Y.Z" / "MySQL X.Y.Z-N" for Percona) gives us EXACT version + a vendor signal we couldn't get from
 filesystem heuristics alone.
@@ -303,67 +376,12 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
             // we shouldn't lower; keep the higher value.
         }
 
-        // Server UUID via auto.cnf — never throws
-        TRY_BEGIN()
-        {
-            String *const uuid = mysqlAutoCnfReadUuid(storage, dataPath);
+        // Server UUID via auto.cnf
+        dataDirReadAutoCnf(storage, dataPath, info);
 
-            if (uuid != NULL)
-            {
-                MEM_CONTEXT_PRIOR_BEGIN()
-                {
-                    info->serverUuid = strDup(uuid);
-                }
-                MEM_CONTEXT_PRIOR_END();
-            }
-        }
-        CATCH_ANY()
-        {
-            // Malformed auto.cnf — don't propagate; leave serverUuid NULL
-            LOG_DETAIL_FMT("auto.cnf inspection failed: %s", errorMessage());
-        }
-        TRY_END();
-
-        // InnoDB tablespace details when present. Single page-0 read feeds both the FSP-flag decode and the adaptive checksum
-        // probe — previously the probe re-opened the same file and read the same bytes a second time.
+        // InnoDB tablespace details when present
         if (sawIbdata || sawMysqlIbd)
-        {
-            TRY_BEGIN()
-            {
-                const String *const probePath =
-                    sawIbdata
-                        ? strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_IBDATA1)
-                        : strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_MYSQL_IBD);
-
-                Buffer *const page0 = storageGetP(
-                    storageNewReadP(storage, probePath, .limit = VARUINT64(mysqlPageSize64K)));
-
-                MysqlControl ctl = mysqlControlFromPage0(bufPtrConst(page0), bufUsed(page0), sawMysqlIbd);
-
-                info->pageSize = ctl.pageSize;
-                info->encrypted = ctl.encrypted;
-                info->pageChecksum = ctl.pageChecksum;                  // Either FullCrc32 (definitive) or None (caller probes)
-                info->antelope = ctl.antelope;
-                info->zipSsize = ctl.zipSsize;
-                mysqlDataDirRaiseVersion(info, ctl.versionNum);
-
-                // Adaptive checksum probe — runs on the SAME buffer we just decoded the FSP header from. Skipped if
-                // FCRC32_MARKER already pinned the algorithm above.
-                if (info->pageChecksum == mysqlPageChecksumNone && info->pageSize > 0 && bufUsed(page0) >= info->pageSize)
-                {
-                    const MysqlPageChecksumAlgo detected =
-                        mysqlPageChecksumValidateAdaptive(bufPtrConst(page0), info->pageSize, /*pageNo*/ 0);
-
-                    if (detected != mysqlPageChecksumNone)
-                        info->pageChecksum = detected;
-                }
-            }
-            CATCH_ANY()
-            {
-                LOG_DETAIL_FMT("ibdata1 inspection failed: %s", errorMessage());
-            }
-            TRY_END();
-        }
+            dataDirProbeInnodb(storage, dataPath, sawIbdata, sawMysqlIbd, info);
 
         // Redo layout (if not already set by #innodb_redo dir presence)
         if (info->redoLayout == mysqlRedoLayoutUnknown && info->hasInnodb)
