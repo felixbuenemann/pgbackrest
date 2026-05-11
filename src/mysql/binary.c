@@ -153,7 +153,8 @@ mysqlBinaryProbe(const String *const binaryPath)
 
         const MysqlVendor vendor = mysqlBinaryDetectVendor(buf);
 
-        // Materialize result in the parent context
+        // Materialize result in the parent context. strTrim mutates versionRaw in place to drop the trailing space/tab that
+        // follows the version token.
         MEM_CONTEXT_PRIOR_BEGIN()
         {
             result = memNew(sizeof(MysqlBinaryInfo));
@@ -161,17 +162,9 @@ mysqlBinaryProbe(const String *const binaryPath)
             {
                 .vendor = vendor,
                 .versionNum = versionNum,
-                .versionRaw = strNewZ(verToken + 5),
+                .versionRaw = strTrim(strNewZ(verToken + 5)),
                 .fullOutput = strNewZ(buf),
             };
-
-            // versionRaw includes everything after "Ver " up to end-of-line — trim trailing space/tab
-            String *const trimmed = strTrim(result->versionRaw);
-            if (trimmed != result->versionRaw)
-            {
-                strFree(result->versionRaw);
-                result->versionRaw = trimmed;
-            }
         }
         MEM_CONTEXT_PRIOR_END();
 
