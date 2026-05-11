@@ -17,7 +17,6 @@ just emits empty/missing fields rather than failing to render.
 #include "common/type/convert.h"
 #include "common/type/keyValue.h"
 #include "common/type/string.h"
-#include "common/type/stringList.h"
 #include "common/type/variant.h"
 #include "mysql/manifest.h"
 #include "version.h"
