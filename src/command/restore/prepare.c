@@ -210,6 +210,13 @@ prepareVerifyCompatibility(
         if (redoIssue != NULL)
             THROW_FMT(OptionInvalidError, "redo-format compatibility FAILED: %s", strZ(redoIssue));
 
+        // 3c. Engine-availability compatibility — refuse a backup whose engines the binary can't load.
+        String *const engineIssue = mysqlBinaryCheckEngineCompat(
+            probe, manifest->info->hasAria, manifest->info->hasIsam, manifest->info->hasTokudb, manifest->info->hasMyrocks);
+
+        if (engineIssue != NULL)
+            THROW_FMT(OptionInvalidError, "engine compatibility FAILED: %s", strZ(engineIssue));
+
         if (issue == NULL)
         {
             LOG_INFO_FMT(

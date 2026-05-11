@@ -172,6 +172,26 @@ main(void)
         info.redoFormatNum = 0;
         mysqlBackupManifestWrite(storage, STRDEF("."), &info, NULL);
 
+        // ---- Test 4c: engine compat — Aria backup on MySQL binary → throws ----
+        info.redoFormatNum = 0;
+        info.hasAria = true;
+        mysqlBackupManifestWrite(storage, STRDEF("."), &info, NULL);
+
+        threw = false;
+        TRY_BEGIN()
+        {
+            prepareVerifyCompatibility(storage, STRDEF("."), STR(mysqlOk), false);
+        }
+        CATCH(OptionInvalidError)
+        {
+            threw = true;
+        }
+        TRY_END();
+
+        expect("Aria backup on MySQL binary → throws engine compat", threw);
+        info.hasAria = false;
+        mysqlBackupManifestWrite(storage, STRDEF("."), &info, NULL);
+
         // ---- Test 5: missing manifest → throws FileMissingError ----
         unlink("/tmp/mybackrest-compat-test/mybackrest_backup_info");
 

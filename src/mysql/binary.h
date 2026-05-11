@@ -56,6 +56,16 @@ FN_EXTERN String *mysqlBinaryCheckCompatibility(
 // max. backupRedoFormat = 0 (unknown) returns NULL since we can't validate without a recorded value.
 FN_EXTERN String *mysqlBinaryCheckRedoCompat(const MysqlBinaryInfo *probe, uint32_t backupRedoFormat);
 
+// Engine compatibility: refuse a backup whose engines the target binary can't load. Concretely:
+//   hasAria      AND binary != MariaDB                  → fatal (Aria is MariaDB-only)
+//   hasIsam      AND binary version >= 40003            → fatal (ISAM removed in MySQL 4.0.3)
+//   hasTokudb    AND binary != Percona, vendor != Mariadb-with-rocksdb → warning
+//   hasMyrocks   AND binary version < 50700             → fatal (MyRocks introduced in MySQL 5.7+)
+// Pass the engine flags from MysqlDataDirInfo. Returns NULL if every engine in the backup is loadable by the target binary,
+// or a String describing the first incompatibility found (caller decides log-and-continue vs throw).
+FN_EXTERN String *mysqlBinaryCheckEngineCompat(
+    const MysqlBinaryInfo *probe, bool hasAria, bool hasIsam, bool hasTokudb, bool hasMyrocks);
+
 /***********************************************************************************************************************************
 Macros for function logging
 ***********************************************************************************************************************************/

@@ -368,3 +368,70 @@ mysqlBinaryCheckRedoCompat(const MysqlBinaryInfo *const probe, const uint32_t ba
 
     FUNCTION_LOG_RETURN(STRING, NULL);
 }
+
+/**********************************************************************************************************************************/
+FN_EXTERN String *
+mysqlBinaryCheckEngineCompat(
+    const MysqlBinaryInfo *const probe, const bool hasAria, const bool hasIsam, const bool hasTokudb, const bool hasMyrocks)
+{
+    FUNCTION_LOG_BEGIN(logLevelDebug);
+        FUNCTION_LOG_PARAM(MY_BINARY_INFO, probe);
+        FUNCTION_LOG_PARAM(BOOL, hasAria);
+        FUNCTION_LOG_PARAM(BOOL, hasIsam);
+        FUNCTION_LOG_PARAM(BOOL, hasTokudb);
+        FUNCTION_LOG_PARAM(BOOL, hasMyrocks);
+    FUNCTION_LOG_END();
+
+    ASSERT(probe != NULL);
+
+    // Aria is exclusively a MariaDB engine. Trying to load .MAD/.MAI files on MySQL or Percona will fail at startup.
+    if (hasAria && probe->vendor != mysqlVendorMariadb)
+    {
+        FUNCTION_LOG_RETURN(
+            STRING,
+            strNewFmt(
+                "backup contains Aria-engine tables (.MAD/.MAI files) but restore binary is vendor %u, not MariaDB —"
+                " Aria can only be loaded by mariadbd",
+                (unsigned int)probe->vendor));
+    }
+
+    // ISAM was removed from MySQL in 4.0.3 (March 2003). A modern binary refuses to recognize .ISD/.ISM files. The user
+    // would need to either restore on a museum binary (4.0.2 or earlier) or run a migration through a 4.x → MyISAM ALTER
+    // chain on the source side before backing up.
+    if (hasIsam && probe->versionNum >= 40003)
+    {
+        FUNCTION_LOG_RETURN(
+            STRING,
+            strNewFmt(
+                "backup contains ISAM tables (.ISD/.ISM files) but restore binary version %u is at or after the 4.0.3"
+                " ISAM removal — restore on MySQL 4.0.2 or earlier, or migrate the source through ALTER TABLE … ENGINE=MyISAM"
+                " before re-backing up",
+                probe->versionNum));
+    }
+
+    // MyRocks introduced in MySQL 5.7 (Facebook → MariaDB → Percona). On older targets the .rocksdb subdir restoration
+    // succeeds but mysqld's MyRocks plugin won't load.
+    if (hasMyrocks && probe->versionNum < 50700)
+    {
+        FUNCTION_LOG_RETURN(
+            STRING,
+            strNewFmt(
+                "backup contains MyRocks/RocksDB data but restore binary version %u is pre-5.7 — the MyRocks plugin"
+                " requires MySQL/Percona/MariaDB 5.7+",
+                probe->versionNum));
+    }
+
+    // TokuDB: deprecated by Percona in 8.0; only available via the xelabs fork or older Percona Server 5.6/5.7. Issue a
+    // warning rather than throwing — the operator may have a compatible binary even if we can't auto-detect it.
+    if (hasTokudb && probe->vendor != mysqlVendorPercona)
+    {
+        FUNCTION_LOG_RETURN(
+            STRING,
+            strNewFmt(
+                "backup contains TokuDB tables (.tokudb files) but restore binary is vendor %u — TokuDB is typically"
+                " only available on Percona Server 5.6/5.7 or the xelabs tokudb-xtrabackup fork",
+                (unsigned int)probe->vendor));
+    }
+
+    FUNCTION_LOG_RETURN(STRING, NULL);
+}

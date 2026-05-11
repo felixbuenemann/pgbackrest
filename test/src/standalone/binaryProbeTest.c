@@ -154,6 +154,52 @@ main(void)
             "redo compat: MariaDB 10.11 binary, unknown backup format → flagged",
             mysqlBinaryCheckRedoCompat(mariadbInfo, 999999) != NULL);
 
+        // ---- Engine compatibility ----
+        // Aria + MySQL → INCOMPATIBLE
+        expect(
+            "engine compat: Aria backup + MySQL binary → INCOMPATIBLE",
+            mysqlBinaryCheckEngineCompat(mysqlInfo, /*aria*/true, false, false, false) != NULL);
+
+        // Aria + MariaDB → OK
+        expect(
+            "engine compat: Aria backup + MariaDB binary → OK",
+            mysqlBinaryCheckEngineCompat(mariadbInfo, /*aria*/true, false, false, false) == NULL);
+
+        // ISAM + MySQL 8.0 → INCOMPATIBLE (ISAM removed in 4.0.3)
+        expect(
+            "engine compat: ISAM backup + MySQL 8.0.36 binary → INCOMPATIBLE",
+            mysqlBinaryCheckEngineCompat(mysqlInfo, false, /*isam*/true, false, false) != NULL);
+
+        // ISAM + 4.0.2 binary → would be OK if we had one; mysql55Info (5.5.62) is post-4.0.3 so still INCOMPATIBLE
+        expect(
+            "engine compat: ISAM backup + MySQL 5.5.62 binary → INCOMPATIBLE",
+            mysqlBinaryCheckEngineCompat(mysql55Info, false, /*isam*/true, false, false) != NULL);
+
+        // MyRocks + MySQL 5.5 → INCOMPATIBLE (MyRocks introduced in 5.7+)
+        expect(
+            "engine compat: MyRocks backup + MySQL 5.5 binary → INCOMPATIBLE",
+            mysqlBinaryCheckEngineCompat(mysql55Info, false, false, false, /*myrocks*/true) != NULL);
+
+        // MyRocks + MySQL 8.0 → OK (assuming plugin available)
+        expect(
+            "engine compat: MyRocks backup + MySQL 8.0.36 binary → OK",
+            mysqlBinaryCheckEngineCompat(mysqlInfo, false, false, false, /*myrocks*/true) == NULL);
+
+        // TokuDB + MySQL → flagged (warning)
+        expect(
+            "engine compat: TokuDB backup + MySQL binary → flagged",
+            mysqlBinaryCheckEngineCompat(mysqlInfo, false, false, /*tokudb*/true, false) != NULL);
+
+        // TokuDB + Percona → OK (Percona was the canonical home)
+        expect(
+            "engine compat: TokuDB backup + Percona binary → OK",
+            mysqlBinaryCheckEngineCompat(perconaInfo, false, false, /*tokudb*/true, false) == NULL);
+
+        // No special engines → always OK
+        expect(
+            "engine compat: no special engines → OK",
+            mysqlBinaryCheckEngineCompat(mysqlInfo, false, false, false, false) == NULL);
+
         // Bad binary: missing "Ver" token
         const char *const badPath = "/tmp/mybackrest-fake-bad";
         writeFakeBinary(badPath, "not a real version string");
