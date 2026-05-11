@@ -88,7 +88,7 @@ main(void)
 
     TRY_BEGIN()
     {
-        printf("MariaDB e2e test (live server at %s):\n", socketPath);
+        printf("e2e test (live server at %s):\n", socketPath);
 
         MysqlClient *const client = mysqlClientNew(
             /*host*/ NULL, /*port*/ 0, STR(socketPath), /*database*/ NULL,
@@ -96,12 +96,19 @@ main(void)
 
         mysqlClientOpen(client);
 
-        expect("connected to MariaDB", client != NULL);
-        expect("vendor detected as MariaDB", mysqlClientVendor(client) == mysqlVendorMariadb);
+        expect("connected to server", client != NULL);
 
+        const MysqlVendor vendor = mysqlClientVendor(client);
         const unsigned int ver = mysqlClientServerVersionNum(client);
-        printf("  INFO  server version = %u\n", ver);
-        expect("server version >= 10.4", ver >= 100400);
+        const char *const vendorName =
+            vendor == mysqlVendorMysql   ? "MySQL"   :
+            vendor == mysqlVendorMariadb ? "MariaDB" :
+            vendor == mysqlVendorPercona ? "Percona" : "(unknown)";
+        printf("  INFO  vendor = %s, version = %u\n", vendorName, ver);
+
+        expect("vendor detected (not Unknown)", vendor != mysqlVendorUnknown);
+        // Reasonable lower bound — covers MySQL 5.0+, MariaDB 5.5+ which are the floor for any orchestrator path that matters
+        expect("server version >= 50500", ver >= 50500);
 
         const Storage *const srcStorage = storagePosixNewP(STR(dataDirZ));
         const Storage *const dstStorage = storagePosixNewP(STR(backupDirZ), .write = true);
@@ -122,11 +129,17 @@ main(void)
             expect("auto.cnf copied (MySQL/Percona)", result->autoCnfCopied);
         expect("at least 2 engines processed", result->enginesProcessed >= 2);
 
-        // MariaDB 10.4+ uses BACKUP STAGE; 10.3 falls back to FTWRL
-        if (ver >= 100400)
+        // Lock-method autodetect is vendor- and version-driven:
+        //   MariaDB 10.4+         → stage    (BACKUP STAGE state machine)
+        //   MariaDB 10.3 / older  → ftwrl    (FLUSH TABLES WITH READ LOCK)
+        //   MySQL/Percona 8.0.16+ → instance (LOCK INSTANCE FOR BACKUP)
+        //   MySQL/Percona older   → ftwrl
+        if (vendor == mysqlVendorMariadb && ver >= 100400)
             expect("lock method = stage (MariaDB 10.4+)", result->lockMethodUsed == mysqlLockMethodStage);
+        else if ((vendor == mysqlVendorMysql || vendor == mysqlVendorPercona) && ver >= 80016)
+            expect("lock method = instance (MySQL/Percona 8.0.16+)", result->lockMethodUsed == mysqlLockMethodInstance);
         else
-            expect("lock method = ftwrl (legacy MariaDB)", result->lockMethodUsed == mysqlLockMethodFtwrl);
+            expect("lock method = ftwrl (legacy)", result->lockMethodUsed == mysqlLockMethodFtwrl);
 
         // ---- Binlog captured ----
         expect("binlog start file captured", result->binlog != NULL && result->binlog->startFile != NULL);
