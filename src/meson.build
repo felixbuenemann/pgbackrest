@@ -458,6 +458,23 @@ executable(
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
 
+# Per-engine smoke tests for the engine modules added for full storage-engine matrix coverage
+executable('standalone-csv-engine-test',
+    src_common, src_mybackrest, files('../test/src/standalone/csvEngineTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false)
+executable('standalone-archive-engine-test',
+    src_common, src_mybackrest, files('../test/src/standalone/archiveEngineTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false)
+executable('standalone-merge-engine-test',
+    src_common, src_mybackrest, files('../test/src/standalone/mergeEngineTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false)
+executable('standalone-connect-engine-test',
+    src_common, src_mybackrest, files('../test/src/standalone/connectEngineTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false)
+executable('standalone-mroonga-engine-test',
+    src_common, src_mybackrest, files('../test/src/standalone/mroongaEngineTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false)
+
 # End-to-end test against a real MySQL/MariaDB/Percona instance — driven by test/e2e/run-mysql.sh which boots a private mysqld
 # on a /tmp socket. Does NOT link harnessMysql — uses the real libmariadb wire protocol.
 executable(
