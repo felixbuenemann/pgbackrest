@@ -182,11 +182,6 @@ mysqlBinlogScan(const Storage *const storage, const String *const binlogPath)
 
             const size_t payloadSize = eventSize - BINLOG_EVENT_HEADER_SIZE;
 
-            // Stash header for events we'll inspect — copying once costs a few bytes vs juggling pointer lifetime when the
-            // header buffer gets reused for the payload read below.
-            uint8_t hdrCopy[BINLOG_EVENT_HEADER_SIZE];
-            memcpy(hdrCopy, hdr, BINLOG_EVENT_HEADER_SIZE);
-
             if (typeCode == BINLOG_EVENT_FORMAT_DESCRIPTION && payloadSize >= 57)
             {
                 // Read enough payload to reach the trailing checksum_alg byte. The FDE post-header is variable in length but
