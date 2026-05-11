@@ -21,6 +21,7 @@ Algorithm:
 #include "common/log.h"
 #include "common/type/string.h"
 #include "mysql/binary.h"
+#include "mysql/interface.h"
 
 #define MYSQL_BINARY_PROBE_MAX_OUTPUT                               4096
 #define MYSQL_VERSION_DICTIONARY_BOUNDARY                           80000           // 8.0+ moved DD into mysql.ibd
@@ -249,4 +250,121 @@ mysqlBinaryInfoToLog(const MysqlBinaryInfo *const this, StringStatic *const debu
         debugLog, "{vendor: %u, versionNum: %u, raw: %s}",
         (unsigned int)this->vendor, this->versionNum,
         this->versionRaw != NULL ? strZ(this->versionRaw) : "(null)");
+}
+
+/***********************************************************************************************************************************
+Map a (vendor, versionNum) to the maximum LOG_HEADER_FORMAT value that vendor's binary at that version can replay. Per
+mysql-server/storage/innobase/include/log0types.h Log_format::CURRENT and equivalent in MariaDB.
+
+  MySQL/Percona < 5.7.9         → 0  (LEGACY)
+  MySQL/Percona 5.7.9 → 8.0.0   → 1
+  MySQL/Percona 8.0.1 → 8.0.2   → 2
+  MySQL/Percona 8.0.3 → 8.0.18  → 3
+  MySQL/Percona 8.0.19 → 8.0.27 → 4
+  MySQL/Percona 8.0.28 → 8.0.29 → 5
+  MySQL/Percona 8.0.30+         → 6
+
+  MariaDB < 10.5                → 104     (FORMAT_10_4 max; older formats: 1, 103, 104)
+  MariaDB 10.5 → 10.7           → "PHYS"  (0x50485953)
+  MariaDB 10.8+                 → "Phys"  (0x50687973)
+
+We don't validate at-format-equality (a 10.5 binary can read 10.4) — only that the backup format isn't NEWER than the binary's
+max. The mapping returns the binary's max-supported value for the comparison.
+***********************************************************************************************************************************/
+static uint32_t
+binaryMaxRedoFormat(const MysqlVendor vendor, const unsigned int versionNum)
+{
+    if (vendor == mysqlVendorMysql || vendor == mysqlVendorPercona)
+    {
+        if (versionNum >= 80030) return MYSQL_REDO_FORMAT_8_0_30;
+        if (versionNum >= 80028) return MYSQL_REDO_FORMAT_8_0_28;
+        if (versionNum >= 80019) return MYSQL_REDO_FORMAT_8_0_19;
+        if (versionNum >= 80003) return MYSQL_REDO_FORMAT_8_0_3;
+        if (versionNum >= 80001) return MYSQL_REDO_FORMAT_8_0_1;
+        if (versionNum >= 50709) return MYSQL_REDO_FORMAT_5_7_9;
+        return MYSQL_REDO_FORMAT_LEGACY;
+    }
+
+    if (vendor == mysqlVendorMariadb)
+    {
+        if (versionNum >= 100800) return MARIADB_REDO_FORMAT_10_8;
+        if (versionNum >= 100500) return MARIADB_REDO_FORMAT_10_5;
+        if (versionNum >= 100400) return MARIADB_REDO_FORMAT_10_4;
+        if (versionNum >= 100300) return MARIADB_REDO_FORMAT_10_3;
+        return MARIADB_REDO_FORMAT_10_2;
+    }
+
+    return 0;                                                           // Unknown vendor — can't validate
+}
+
+/**********************************************************************************************************************************/
+FN_EXTERN String *
+mysqlBinaryCheckRedoCompat(const MysqlBinaryInfo *const probe, const uint32_t backupRedoFormat)
+{
+    FUNCTION_LOG_BEGIN(logLevelDebug);
+        FUNCTION_LOG_PARAM(MY_BINARY_INFO, probe);
+        FUNCTION_LOG_PARAM(UINT, backupRedoFormat);
+    FUNCTION_LOG_END();
+
+    ASSERT(probe != NULL);
+
+    // backupRedoFormat=0 means the manifest didn't record one (older mybackrest output) — can't validate, accept silently
+    if (backupRedoFormat == 0)
+        FUNCTION_LOG_RETURN(STRING, NULL);
+
+    // Unknown vendor → can't validate. Note we can't use binaryMax==0 as the "unknown" signal because format 0 (LEGACY) is a
+    // VALID supported format for very old MySQL — so test the vendor directly.
+    if (probe->vendor == mysqlVendorUnknown)
+        FUNCTION_LOG_RETURN(STRING, NULL);
+
+    const uint32_t binaryMax = binaryMaxRedoFormat(probe->vendor, probe->versionNum);
+
+    // MySQL formats are sequential integers (0..6); MariaDB formats are unique magic numbers (1, 103, 104, 0x50485953,
+    // 0x50687973). For MariaDB the comparison is "is backupFormat in the SET of formats the binary supports?" not "is it
+    // numerically <=". Since the binary's max is the LATEST format it supports and it can read all earlier ones, we order
+    // them by introduction date.
+    static const uint32_t mariadbFormatOrder[] = {
+        MARIADB_REDO_FORMAT_10_2, MARIADB_REDO_FORMAT_10_3, MARIADB_REDO_FORMAT_10_4,
+        MARIADB_REDO_FORMAT_10_5, MARIADB_REDO_FORMAT_10_8,
+    };
+
+    if (probe->vendor == mysqlVendorMariadb)
+    {
+        // Find positions of backupRedoFormat and binaryMax in the order array; backup must be <= binary
+        int backupPos = -1, binaryPos = -1;
+        for (size_t i = 0; i < sizeof(mariadbFormatOrder) / sizeof(mariadbFormatOrder[0]); i++)
+        {
+            if (mariadbFormatOrder[i] == backupRedoFormat) backupPos = (int)i;
+            if (mariadbFormatOrder[i] == binaryMax) binaryPos = (int)i;
+        }
+
+        if (backupPos < 0)
+            FUNCTION_LOG_RETURN(STRING, strNewFmt("backup redo_format_num 0x%08x is not a recognized MariaDB format", backupRedoFormat));
+
+        if (binaryPos >= 0 && backupPos > binaryPos)
+        {
+            FUNCTION_LOG_RETURN(
+                STRING,
+                strNewFmt(
+                    "backup uses MariaDB redo format 0x%08x but the binary at version %u only supports up to 0x%08x —"
+                    " the binary cannot replay this backup's redo log",
+                    backupRedoFormat, probe->versionNum, binaryMax));
+        }
+
+        FUNCTION_LOG_RETURN(STRING, NULL);
+    }
+
+    // MySQL/Percona: numerical comparison
+    if (backupRedoFormat > binaryMax)
+    {
+        FUNCTION_LOG_RETURN(
+            STRING,
+            strNewFmt(
+                "backup uses MySQL redo format %u but the binary at version %u only supports up to format %u —"
+                " upgrade the binary to at least the version that introduced format %u (or take a fresh backup on"
+                " a clean shutdown so the redo log is empty)",
+                backupRedoFormat, probe->versionNum, binaryMax, backupRedoFormat));
+    }
+
+    FUNCTION_LOG_RETURN(STRING, NULL);
 }

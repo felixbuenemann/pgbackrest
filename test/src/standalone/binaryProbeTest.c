@@ -128,6 +128,32 @@ main(void)
         // Note: this assertion is always true — it just exercises the path without asserting strict outcome since the warning
         // is informational and the function returns the warning string for the caller to log.
 
+        // ---- Redo-format compatibility ----
+        // MySQL 8.0.36 binary (max format = 6) reading a backup with redo format 6 → OK
+        expect(
+            "redo compat: MySQL 8.0.36 binary, backup format 6 → OK",
+            mysqlBinaryCheckRedoCompat(mysqlInfo, 6) == NULL);
+
+        // MySQL 5.5.62 binary (max format = 0) reading a backup with redo format 6 → INCOMPATIBLE
+        expect(
+            "redo compat: MySQL 5.5.62 binary, backup format 6 → INCOMPATIBLE",
+            mysqlBinaryCheckRedoCompat(mysql55Info, 6) != NULL);
+
+        // backupRedoFormat = 0 (manifest didn't record one) → accept silently
+        expect(
+            "redo compat: backupRedoFormat=0 → silently OK",
+            mysqlBinaryCheckRedoCompat(mysqlInfo, 0) == NULL);
+
+        // MariaDB 10.11 binary (max format Phys = 0x50687973) reading a backup with PHYS (10.5) → OK
+        expect(
+            "redo compat: MariaDB 10.11 binary, backup PHYS (10.5) → OK (newer can read older)",
+            mysqlBinaryCheckRedoCompat(mariadbInfo, 0x50485953U) == NULL);
+
+        // MariaDB 10.11 binary reading a backup with format 999999 (made-up) → unrecognized
+        expect(
+            "redo compat: MariaDB 10.11 binary, unknown backup format → flagged",
+            mysqlBinaryCheckRedoCompat(mariadbInfo, 999999) != NULL);
+
         // Bad binary: missing "Ver" token
         const char *const badPath = "/tmp/mybackrest-fake-bad";
         writeFakeBinary(badPath, "not a real version string");

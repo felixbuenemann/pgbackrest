@@ -50,6 +50,12 @@ FN_EXTERN MysqlBinaryInfo *mysqlBinaryProbe(const String *binaryPath);
 FN_EXTERN String *mysqlBinaryCheckCompatibility(
     const MysqlBinaryInfo *probe, MysqlVendor backupVendor, unsigned int backupVersionNum);
 
+// Redo log format compatibility: a binary can replay only redo formats <= the format it was compiled with. A backup written by
+// 8.0.30+ (format 6) on a target 8.0.19 binary (max format 4) → recovery refuses to start. Returns NULL if compatible (binary
+// is at the same or newer version that introduced the format), or a warning string if backupRedoFormat > binary's expected
+// max. backupRedoFormat = 0 (unknown) returns NULL since we can't validate without a recorded value.
+FN_EXTERN String *mysqlBinaryCheckRedoCompat(const MysqlBinaryInfo *probe, uint32_t backupRedoFormat);
+
 /***********************************************************************************************************************************
 Macros for function logging
 ***********************************************************************************************************************************/
