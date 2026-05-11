@@ -231,43 +231,38 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
         }
         TRY_END();
 
-        // InnoDB tablespace details when present
+        // InnoDB tablespace details when present. Single page-0 read feeds both the FSP-flag decode and the adaptive checksum
+        // probe — previously the probe re-opened the same file and read the same bytes a second time.
         if (sawIbdata || sawMysqlIbd)
         {
             TRY_BEGIN()
             {
-                MysqlControl ctl = mysqlControlFromIbdata(storage, dataPath);
+                const String *const probePath =
+                    sawIbdata
+                        ? strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_IBDATA1)
+                        : strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_MYSQL_IBD);
+
+                Buffer *const page0 = storageGetP(
+                    storageNewReadP(storage, probePath, .limit = VARUINT64(mysqlPageSize64K)));
+
+                MysqlControl ctl = mysqlControlFromPage0(bufPtrConst(page0), bufUsed(page0), sawMysqlIbd);
+
                 info->pageSize = ctl.pageSize;
                 info->encrypted = ctl.encrypted;
                 info->pageChecksum = ctl.pageChecksum;                  // Either FullCrc32 (definitive) or None (caller probes)
                 info->antelope = ctl.antelope;
                 info->zipSsize = ctl.zipSsize;
-
-                // mysqlControlFromIbdata already infers 50700 vs 80000; honor it as a floor.
                 mysqlDataDirRaiseVersion(info, ctl.versionNum);
 
-                // If pageChecksum is still unknown (FCRC32 marker bit was clear → could be CRC32 or legacy "innodb"), probe
-                // page 0 itself with the adaptive validator. Page 0 carries an FSP_HEADER but its FIL header + checksum field
-                // are standard, so the same validator works. The result tells us which algorithm is in use; subsequent pages
-                // can skip the probe.
-                if (info->pageChecksum == mysqlPageChecksumNone && info->pageSize > 0)
+                // Adaptive checksum probe — runs on the SAME buffer we just decoded the FSP header from. Skipped if
+                // FCRC32_MARKER already pinned the algorithm above.
+                if (info->pageChecksum == mysqlPageChecksumNone && info->pageSize > 0 && bufUsed(page0) >= info->pageSize)
                 {
-                    const String *const probePath =
-                        sawIbdata
-                            ? strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_IBDATA1)
-                            : strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_MYSQL_IBD);
+                    const MysqlPageChecksumAlgo detected =
+                        mysqlPageChecksumValidateAdaptive(bufPtrConst(page0), info->pageSize, /*pageNo*/ 0);
 
-                    Buffer *const page0 = storageGetP(
-                        storageNewReadP(storage, probePath, .limit = VARUINT64(info->pageSize)));
-
-                    if (page0 != NULL && bufUsed(page0) >= info->pageSize)
-                    {
-                        const MysqlPageChecksumAlgo detected =
-                            mysqlPageChecksumValidateAdaptive(bufPtrConst(page0), info->pageSize, /*pageNo*/ 0);
-
-                        if (detected != mysqlPageChecksumNone)
-                            info->pageChecksum = detected;
-                    }
+                    if (detected != mysqlPageChecksumNone)
+                        info->pageChecksum = detected;
                 }
             }
             CATCH_ANY()

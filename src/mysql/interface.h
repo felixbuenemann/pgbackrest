@@ -135,8 +135,14 @@ Functions
 // Read auto.cnf and return server-uuid as a 36-char string (or NULL if missing)
 FN_EXTERN String *mysqlAutoCnfReadUuid(const Storage *storage, const String *dataPath);
 
-// Parse FSP_HEADER of page 0 of ibdata1 (or mysql.ibd on 8.0+) for page size + flags + space id
+// Parse FSP_HEADER of page 0 of ibdata1 (or mysql.ibd on 8.0+) for page size + flags + space id. Wrapper that does the file
+// open + read; for callers that already have page 0 in memory (mysqlDataDirInspect runs an adaptive checksum probe right after
+// this and would otherwise re-read the same bytes), use mysqlControlFromPage0 directly.
 FN_EXTERN MysqlControl mysqlControlFromIbdata(const Storage *storage, const String *dataPath);
+
+// Decode the InnoDB control fields from an in-memory page-0 buffer. has80Dictionary tells the version-floor inference whether
+// mysql.ibd was the source (→ 8.0+) or ibdata1 was the source (→ pre-8.0; fall back to 5.5 minimum).
+FN_EXTERN MysqlControl mysqlControlFromPage0(const unsigned char *page, size_t pageBytes, bool has80Dictionary);
 
 // Detect redo log layout by probing #innodb_redo/ vs ib_logfile0
 FN_EXTERN MysqlRedoLayout mysqlRedoLayoutDetect(const Storage *storage, const String *dataPath);

@@ -122,6 +122,38 @@ mysqlReadU32Be(const unsigned char *const p)
 
 /**********************************************************************************************************************************/
 FN_EXTERN MysqlControl
+mysqlControlFromPage0(const unsigned char *const page, const size_t pageBytes, const bool has80Dictionary)
+{
+    ASSERT(page != NULL);
+
+    if (pageBytes < FSP_SPACE_FLAGS + 4)
+        THROW_FMT(FormatError, "page 0 buffer too short (%zu bytes) to contain FSP_HEADER", pageBytes);
+
+    const uint32_t spaceId = mysqlReadU32Be(page + FIL_PAGE_SPACE_ID);
+    const uint32_t flags = mysqlReadU32Be(page + FSP_SPACE_FLAGS);
+    const uint32_t spaceIdFsp = mysqlReadU32Be(page + FSP_SPACE_ID);
+
+    if (spaceId != spaceIdFsp)
+    {
+        THROW_FMT(
+            FormatError, "page 0: FIL_PAGE_SPACE_ID (%u) disagrees with FSP_SPACE_ID (%u) — header is corrupt",
+            spaceId, spaceIdFsp);
+    }
+
+    MysqlControl result = {0};
+    result.pageSize = mysqlPageSizeFromFlags(flags);
+    result.encrypted = (flags & FSP_FLAGS_MASK_ENCRYPTION) != 0;
+    result.hasSdi = (flags & FSP_FLAGS_MASK_SDI) != 0;
+    result.zipSsize = (flags & FSP_FLAGS_MASK_ZIP_SSIZE) >> FSP_FLAGS_POS_ZIP_SSIZE;
+    result.antelope = (flags & FSP_FLAGS_MASK_POST_ANTELOPE) == 0;
+    result.pageChecksum = (flags & FSP_FLAGS_MASK_FCRC32_MARKER) ? mysqlPageChecksumFullCrc32 : mysqlPageChecksumNone;
+    result.versionNum = has80Dictionary ? 80000 : 50500;
+
+    return result;
+}
+
+/**********************************************************************************************************************************/
+FN_EXTERN MysqlControl
 mysqlControlFromIbdata(const Storage *const storage, const String *const dataPath)
 {
     FUNCTION_LOG_BEGIN(logLevelDebug);
@@ -164,52 +196,10 @@ mysqlControlFromIbdata(const Storage *const storage, const String *const dataPat
         Buffer *const page0 = storageGetP(
             storageNewReadP(storage, fileToRead, .limit = VARUINT64(mysqlPageSize64K)));
 
-        if (bufUsed(page0) < FSP_SPACE_FLAGS + 4)
-        {
-            THROW_FMT(
-                FormatError, "%s is too short (%zu bytes) to contain an FSP_HEADER", strZ(fileToRead), bufUsed(page0));
-        }
-
-        const unsigned char *const data = bufPtrConst(page0);
-
-        // Pull the fields we care about
-        const uint32_t spaceId = mysqlReadU32Be(data + FIL_PAGE_SPACE_ID);
-        const uint32_t flags = mysqlReadU32Be(data + FSP_SPACE_FLAGS);
-        const uint32_t spaceIdFsp = mysqlReadU32Be(data + FSP_SPACE_ID);
-
-        if (spaceId != spaceIdFsp)
-        {
-            THROW_FMT(
-                FormatError,
-                "%s page 0: FIL_PAGE_SPACE_ID (%u) disagrees with FSP_SPACE_ID (%u) — header is corrupt",
-                strZ(fileToRead), spaceId, spaceIdFsp);
-        }
-
-        result.pageSize = mysqlPageSizeFromFlags(flags);
-        result.encrypted = (flags & FSP_FLAGS_MASK_ENCRYPTION) != 0;
-        result.hasSdi = (flags & FSP_FLAGS_MASK_SDI) != 0;
-        result.zipSsize = (flags & FSP_FLAGS_MASK_ZIP_SSIZE) >> FSP_FLAGS_POS_ZIP_SSIZE;
-
-        // POST_ANTELOPE bit: 0 = Antelope (original format, MySQL 4.1 → 5.5.6 default), 1 = Barracuda or later. Old upgraded
-        // installations carry Antelope ibdata1 forward forever — backup is fine because the FSP layout + standard checksum
-        // are identical, but the orchestrator may want to warn about per-table .ibd files using ROW_FORMAT=COMPRESSED (which
-        // requires Barracuda — Antelope can't produce them).
-        result.antelope = (flags & FSP_FLAGS_MASK_POST_ANTELOPE) == 0;
-
-        // Definitive checksum-algo signal: MariaDB sets bit 4 to mark full_crc32 mode. For everyone else the algo isn't stored
-        // on disk — leave pageChecksum at None and let the adaptive validator probe at copy time.
-        if (flags & FSP_FLAGS_MASK_FCRC32_MARKER)
-            result.pageChecksum = mysqlPageChecksumFullCrc32;
-        else
-            result.pageChecksum = mysqlPageChecksumNone;                // Means "unknown — caller should probe adaptively"
-
-        // Layout flavor — presence of mysql.ibd is a hard signal for 8.0+ data dictionary. Without it we return the absolute
-        // minimum supported version (5.5) as a SAFE LOWER BOUND; callers (notably mysqlDataDirInspect) refine upward using
-        // additional filesystem signals (sys/ schema → 5.7, mysql/gtid_executed.* → 5.6.5+).
         const bool has80Dictionary = strEqZ(strBase(fileToRead), MYSQL_FILE_MYSQL_IBD) ||
             storageExistsP(storage, strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_MYSQL_IBD));
 
-        result.versionNum = has80Dictionary ? 80000 : 50500;
+        result = mysqlControlFromPage0(bufPtrConst(page0), bufUsed(page0), has80Dictionary);
 
         // Redo layout follows from datadir layout
         result.redoLayout = mysqlRedoLayoutDetect(storage, dataPath);
