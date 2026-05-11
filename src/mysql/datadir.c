@@ -37,6 +37,99 @@ mysqlDataDirRaiseVersion(MysqlDataDirInfo *const info, const unsigned int candid
         info->versionNum = candidate;
 }
 
+/***********************************************************************************************************************************
+Parse <dataPath>/grastate.dat for the Galera cluster state. Format is YAML-ish (key:value, not INI's key=value), small (5-7
+lines). Sets info->galeraStateUuid, galeraSeqno, safeToBootstrap. Caller is responsible for the parent-context allocation
+expected of strDup'd fields. Silently tolerates a missing or malformed file.
+***********************************************************************************************************************************/
+static void
+dataDirReadGalera(const Storage *const storage, const String *const dataPath, MysqlDataDirInfo *const info)
+{
+    info->galeraSeqno = -1;
+    info->safeToBootstrap = -1;
+
+    TRY_BEGIN()
+    {
+        const String *const grastatePath = strNewFmt("%s/grastate.dat", strZ(dataPath));
+        Buffer *const content = storageGetP(storageNewReadP(storage, grastatePath, .ignoreMissing = true));
+
+        if (content == NULL)
+            return;
+
+        const String *const text = strNewBuf(content);
+        StringList *const lines = strLstNewSplit(text, STRDEF("\n"));
+
+        for (unsigned int i = 0; i < strLstSize(lines); i++)
+        {
+            const String *const line = strTrim(strDup(strLstGet(lines, i)));
+
+            if (strBeginsWithZ(line, "uuid:"))
+            {
+                const String *const uuid = strTrim(strSubN(line, 5, strSize(line) - 5));
+
+                MEM_CONTEXT_PRIOR_BEGIN()
+                {
+                    info->galeraStateUuid = strDup(uuid);
+                }
+                MEM_CONTEXT_PRIOR_END();
+            }
+            else if (strBeginsWithZ(line, "seqno:"))
+            {
+                const String *const seqStr = strTrim(strSubN(line, 6, strSize(line) - 6));
+                info->galeraSeqno = cvtZToInt64(strZ(seqStr));
+            }
+            else if (strBeginsWithZ(line, "safe_to_bootstrap:"))
+            {
+                const String *const stbStr = strTrim(strSubN(line, 18, strSize(line) - 18));
+                info->safeToBootstrap = cvtZToInt(strZ(stbStr));
+            }
+        }
+    }
+    CATCH_ANY()
+    {
+        LOG_DETAIL_FMT("grastate.dat parse failed: %s", errorMessage());
+    }
+    TRY_END();
+}
+
+/***********************************************************************************************************************************
+Refine info from the InnoDB redo log header's LOG_HEADER_CREATOR string + LOG_HEADER_FORMAT field. The creator string ("MySQL
+X.Y.Z" / "MariaDB X.Y.Z" / "MySQL X.Y.Z-N" for Percona) gives us EXACT version + a vendor signal we couldn't get from
+filesystem heuristics alone.
+***********************************************************************************************************************************/
+static void
+dataDirReadRedoCreator(const Storage *const storage, const String *const dataPath, MysqlDataDirInfo *const info)
+{
+    TRY_BEGIN()
+    {
+        MysqlRedoCreator creator = mysqlRedoCreatorRead(storage, dataPath);
+
+        if (creator.versionNum != 0)
+        {
+            info->versionNum = creator.versionNum;
+            info->versionExact = true;
+        }
+
+        info->redoFormatNum = creator.formatNum;
+        info->encryptedRedo = creator.encryptedRedo;
+
+        // Override vendor only if filesystem heuristic didn't already pin us to MariaDB or Percona via engine-specific markers.
+        // The creator string can't distinguish Percona from upstream MySQL because Percona uses "MySQL X.Y.Z-N" too — the
+        // audit.log signal is more specific, so don't override Percona to Mysql.
+        if (creator.vendor != mysqlVendorUnknown &&
+            (info->vendor == mysqlVendorUnknown ||
+             (info->vendor == mysqlVendorMysql && creator.vendor == mysqlVendorMariadb)))
+        {
+            info->vendor = creator.vendor;
+        }
+    }
+    CATCH_ANY()
+    {
+        LOG_DETAIL_FMT("redo log creator inspection failed: %s", errorMessage());
+    }
+    TRY_END();
+}
+
 /**********************************************************************************************************************************/
 FN_EXTERN MysqlDataDirInfo *
 mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
@@ -276,98 +369,17 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
         if (info->redoLayout == mysqlRedoLayoutUnknown && info->hasInnodb)
             info->redoLayout = mysqlRedoLayoutDetect(storage, dataPath);
 
-        // Redo log header creator: most authoritative version signal we have. Both MySQL and MariaDB write a "MySQL X.Y.Z" or
-        // "MariaDB X.Y.Z" string at offset 16 of the redo file header when they create it. Use this to refine versionNum to
-        // an EXACT value, and override vendor when the creator string disagrees with our filesystem heuristics.
+        // Redo log header creator + format-num refinement (covers InnoDB datadirs only)
         if (info->hasInnodb)
-        {
-            TRY_BEGIN()
-            {
-                MysqlRedoCreator creator = mysqlRedoCreatorRead(storage, dataPath);
+            dataDirReadRedoCreator(storage, dataPath, info);
 
-                if (creator.versionNum != 0)
-                {
-                    // The creator string is exact; previous heuristic was a lower bound, so promote.
-                    info->versionNum = creator.versionNum;
-                    info->versionExact = true;
-                }
-
-                // Surface the LOG_HEADER_FORMAT field (and the MariaDB encryption-bit) so the manifest can record exact
-                // redo-log format compatibility info for the restore-side check.
-                info->redoFormatNum = creator.formatNum;
-                info->encryptedRedo = creator.encryptedRedo;
-
-                if (creator.vendor != mysqlVendorUnknown)
-                {
-                    // Override vendor only if filesystem heuristic didn't already pin us to MariaDB or Percona via
-                    // engine-specific markers (Aria, .rocksdb, audit.log). The creator string can't distinguish Percona from
-                    // upstream MySQL because Percona uses "MySQL X.Y.Z-N" too — the audit.log signal is more specific.
-                    if (info->vendor == mysqlVendorUnknown ||
-                        (info->vendor == mysqlVendorMysql && creator.vendor == mysqlVendorMariadb))
-                    {
-                        info->vendor = creator.vendor;
-                    }
-                }
-            }
-            CATCH_ANY()
-            {
-                LOG_DETAIL_FMT("redo log creator inspection failed: %s", errorMessage());
-            }
-            TRY_END();
-        }
-
-        // Galera state file: if present, parse uuid + seqno from the last-known-good cluster state. Format is plain INI:
-        //   # GALERA saved state
-        //   version: 2.1
-        //   uuid:    abc123-...
-        //   seqno:   12345
-        //   safe_to_bootstrap: 0
-        info->galeraSeqno = -1;
-        info->safeToBootstrap = -1;
+        // Galera cluster state (grastate.dat parse)
         if (info->hasGalera)
+            dataDirReadGalera(storage, dataPath, info);
+        else
         {
-            TRY_BEGIN()
-            {
-                const String *const grastatePath = strNewFmt("%s/grastate.dat", strZ(dataPath));
-                Buffer *const content = storageGetP(storageNewReadP(storage, grastatePath, .ignoreMissing = true));
-
-                if (content != NULL)
-                {
-                    const String *const text = strNewBuf(content);
-                    StringList *const lines = strLstNewSplit(text, STRDEF("\n"));
-
-                    for (unsigned int i = 0; i < strLstSize(lines); i++)
-                    {
-                        const String *const line = strTrim(strDup(strLstGet(lines, i)));
-
-                        if (strBeginsWithZ(line, "uuid:"))
-                        {
-                            const String *const uuid = strTrim(strSubN(line, 5, strSize(line) - 5));
-
-                            MEM_CONTEXT_PRIOR_BEGIN()
-                            {
-                                info->galeraStateUuid = strDup(uuid);
-                            }
-                            MEM_CONTEXT_PRIOR_END();
-                        }
-                        else if (strBeginsWithZ(line, "seqno:"))
-                        {
-                            const String *const seqStr = strTrim(strSubN(line, 6, strSize(line) - 6));
-                            info->galeraSeqno = cvtZToInt64(strZ(seqStr));
-                        }
-                        else if (strBeginsWithZ(line, "safe_to_bootstrap:"))
-                        {
-                            const String *const stbStr = strTrim(strSubN(line, 18, strSize(line) - 18));
-                            info->safeToBootstrap = cvtZToInt(strZ(stbStr));
-                        }
-                    }
-                }
-            }
-            CATCH_ANY()
-            {
-                LOG_DETAIL_FMT("grastate.dat parse failed: %s", errorMessage());
-            }
-            TRY_END();
+            info->galeraSeqno = -1;
+            info->safeToBootstrap = -1;
         }
 
         // If we still haven't set vendor, default to MySQL
