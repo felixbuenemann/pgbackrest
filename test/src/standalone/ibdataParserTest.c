@@ -121,7 +121,7 @@ main(void)
         free(page);
 
         MysqlControl ctlNo80 = mysqlControlFromIbdata(storage, STRDEF("."));
-        expect("no mysql.ibd → versionNum 50700 (pre-8.0)", ctlNo80.versionNum == 50700);
+        expect("no mysql.ibd → versionNum 50500 (safe lower bound)", ctlNo80.versionNum == 50500);
 
         writePage("/tmp/mybackrest-ibdata-test/mysql.ibd", buildIbdata(0));   // synthetic mysql.ibd just so existence is true
         MysqlControl ctlWith80 = mysqlControlFromIbdata(storage, STRDEF("."));

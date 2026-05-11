@@ -208,12 +208,13 @@ mysqlControlFromIbdata(const Storage *const storage, const String *const dataPat
 
         result.pageSize = mysqlPageSizeFromFlags(flags);
 
-        // Layout flavor — presence of mysql.ibd indicates 8.0+ data dictionary; the version number itself can't be derived from
-        // the file alone, so leave versionNum at 0 and let callers fill it from a live SELECT VERSION() if available.
+        // Layout flavor — presence of mysql.ibd is a hard signal for 8.0+ data dictionary. Without it we return the absolute
+        // minimum supported version (5.5) as a SAFE LOWER BOUND; callers (notably mysqlDataDirInspect) refine upward using
+        // additional filesystem signals (sys/ schema → 5.7, mysql/gtid_executed.* → 5.6.5+).
         const bool has80Dictionary = strEqZ(strBase(fileToRead), MYSQL_FILE_MYSQL_IBD) ||
             storageExistsP(storage, strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_MYSQL_IBD));
 
-        result.versionNum = has80Dictionary ? 80000 : 50700;
+        result.versionNum = has80Dictionary ? 80000 : 50500;
 
         // Redo layout follows from datadir layout
         result.redoLayout = mysqlRedoLayoutDetect(storage, dataPath);
@@ -224,6 +225,190 @@ mysqlControlFromIbdata(const Storage *const storage, const String *const dataPat
     MEM_CONTEXT_TEMP_END();
 
     FUNCTION_LOG_RETURN(MY_CONTROL, result);
+}
+
+/***********************************************************************************************************************************
+Find the first redo log file under <dataPath> regardless of layout flavor.
+  - 8.0.30+: any file in <dataPath>/#innodb_redo/ (skip the *_tmp pre-allocated ones if a non-tmp exists)
+  - Pre-8.0.30: <dataPath>/ib_logfile0
+Returns NULL relative path if no redo log file is present.
+***********************************************************************************************************************************/
+static String *
+mysqlRedoFirstFile(const Storage *const storage, const String *const dataPath)
+{
+    String *result = NULL;
+
+    const String *const innodbRedoDir = strNewFmt("%s/%s", strZ(dataPath), MYSQL_PATH_INNODB_REDO);
+
+    if (storageExistsP(storage, innodbRedoDir))
+    {
+        // Pick the first non-tmp file in the redo dir
+        StorageIterator *const itr = storageNewItrP(
+            storage, innodbRedoDir, .level = storageInfoLevelType, .nullOnMissing = true);
+
+        if (itr != NULL)
+        {
+            String *fallback = NULL;
+
+            while (storageItrMore(itr))
+            {
+                const StorageInfo info = storageItrNext(itr);
+
+                if (info.exists && info.type == storageTypeFile && strBeginsWithZ(info.name, MYSQL_FILE_IB_REDO_PREFIX))
+                {
+                    if (strstr(strZ(info.name), "_tmp") == NULL)
+                    {
+                        result = strNewFmt("%s/%s", strZ(innodbRedoDir), strZ(info.name));
+                        break;
+                    }
+                    else if (fallback == NULL)
+                    {
+                        fallback = strNewFmt("%s/%s", strZ(innodbRedoDir), strZ(info.name));
+                    }
+                }
+            }
+
+            if (result == NULL && fallback != NULL)
+                result = fallback;
+        }
+    }
+
+    if (result == NULL)
+    {
+        const String *const ibLogfile0 = strNewFmt("%s/%s0", strZ(dataPath), MYSQL_FILE_IB_LOGFILE_PREFIX);
+
+        if (storageExistsP(storage, ibLogfile0))
+            result = strDup(ibLogfile0);
+    }
+
+    return result;
+}
+
+/**********************************************************************************************************************************/
+FN_EXTERN MysqlRedoCreator
+mysqlRedoCreatorRead(const Storage *const storage, const String *const dataPath)
+{
+    FUNCTION_LOG_BEGIN(logLevelDebug);
+        FUNCTION_LOG_PARAM(STORAGE, storage);
+        FUNCTION_LOG_PARAM(STRING, dataPath);
+    FUNCTION_LOG_END();
+
+    ASSERT(storage != NULL);
+    ASSERT(dataPath != NULL);
+
+    MysqlRedoCreator result = {.vendor = mysqlVendorUnknown, .versionNum = 0, .raw = NULL};
+
+    MEM_CONTEXT_TEMP_BEGIN()
+    {
+        const String *const redoPath = mysqlRedoFirstFile(storage, dataPath);
+
+        if (redoPath != NULL)
+        {
+            // LOG_HEADER_CREATOR is at offset 16, max 32 bytes (matches both MySQL and MariaDB layout). Read 64 bytes total
+            // so we comfortably cover the field plus its NUL terminator.
+            Buffer *const header = storageGetP(
+                storageNewReadP(storage, redoPath, .limit = VARUINT64(64)));
+
+            if (header != NULL && bufUsed(header) >= 48)
+            {
+                const unsigned char *const data = bufPtrConst(header);
+
+                // The field is NUL-terminated within its 32-byte slot. Find the NUL or hit the slot boundary.
+                char creator[33];
+                size_t len = 0;
+                for (size_t i = 0; i < 32; i++)
+                {
+                    const unsigned char c = data[16 + i];
+                    if (c == 0)
+                        break;
+                    creator[len++] = (char)c;
+                }
+                creator[len] = '\0';
+
+                // Vendor detection by prefix + suffix. Per the cloned percona-server source
+                // (storage/innobase/include/univ.i): Percona's INNODB_VERSION_STR is
+                //   IB_TO_STR(MAJOR) "." IB_TO_STR(MINOR) "." IB_TO_STR(BUGFIX) "-" IB_TO_STR(PERCONA_INNODB_VERSION)
+                // so a Percona 8.0.36 redo header says "MySQL 8.0.36-8" (8 is the Percona-specific InnoDB version int),
+                // while upstream MySQL 8.0.36 says plain "MySQL 8.0.36". The "-N" suffix after the version is the
+                // distinguishing signal.
+                if (strncmp(creator, "MariaDB ", 8) == 0)
+                {
+                    result.vendor = mysqlVendorMariadb;
+                }
+                else if (strncmp(creator, "MySQL Clone", 11) == 0)
+                {
+                    // CLONE plugin output — vendor would have matched the source server; treat as MySQL (caller can refine)
+                    result.vendor = mysqlVendorMysql;
+                }
+                else if (strncmp(creator, "MySQL ", 6) == 0)
+                {
+                    result.vendor = mysqlVendorMysql;                   // default — refined below if Percona suffix found
+                }
+                else if (strncmp(creator, "MEB ", 4) == 0)
+                {
+                    // MySQL Enterprise Backup wrote this — we're inspecting a backup directory, not a live datadir
+                    result.vendor = mysqlVendorUnknown;
+                }
+                else if (strstr(creator, "Percona") != NULL || strstr(creator, "Xtra") != NULL)
+                {
+                    // xtrabackup writes "Percona-XtraBackup X.Y.Z" — we're looking at a backup dir, not a live datadir
+                    result.vendor = mysqlVendorPercona;
+                }
+
+                // Version: scan past the prefix word for "X.Y.Z" (and check for the Percona "-N" suffix)
+                const char *digits = creator;
+                while (*digits != '\0' && (*digits < '0' || *digits > '9'))
+                    digits++;
+
+                if (*digits != '\0')
+                {
+                    unsigned int major = 0, minor = 0, patch = 0;
+                    int consumed = 0;
+                    if (sscanf(digits, "%u.%u.%u%n", &major, &minor, &patch, &consumed) >= 3)
+                    {
+                        result.versionNum = major * 10000 + minor * 100 + patch;
+
+                        // After the version, Percona appends "-N" where N is PERCONA_INNODB_VERSION (small integer).
+                        // Upstream MySQL has nothing after the patch number, so the presence of "-<digit>" promotes the
+                        // detected vendor from generic MySQL to Percona.
+                        if (consumed > 0 && digits[consumed] == '-' && digits[consumed + 1] >= '0' && digits[consumed + 1] <= '9'
+                            && result.vendor == mysqlVendorMysql)
+                        {
+                            result.vendor = mysqlVendorPercona;
+                        }
+                    }
+                    else if (sscanf(digits, "%u.%u", &major, &minor) >= 2)
+                    {
+                        result.versionNum = major * 10000 + minor * 100;
+                    }
+                }
+
+                MEM_CONTEXT_PRIOR_BEGIN()
+                {
+                    result.raw = strNewZ(creator);
+                }
+                MEM_CONTEXT_PRIOR_END();
+            }
+        }
+    }
+    MEM_CONTEXT_TEMP_END();
+
+    FUNCTION_LOG_RETURN(MY_REDO_CREATOR, result);
+}
+
+/**********************************************************************************************************************************/
+FN_EXTERN void
+mysqlRedoCreatorToLog(const MysqlRedoCreator *const this, StringStatic *const debugLog)
+{
+    if (this == NULL)
+    {
+        strStcCat(debugLog, "null");
+        return;
+    }
+
+    strStcFmt(
+        debugLog, "{vendor: %u, versionNum: %u, raw: %s}",
+        (unsigned int)this->vendor, this->versionNum, this->raw != NULL ? strZ(this->raw) : "(null)");
 }
 
 /**********************************************************************************************************************************/

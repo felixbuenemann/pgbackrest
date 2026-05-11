@@ -17,6 +17,7 @@ fsp0types.h) and are therefore not copyrightable. Implementation lives in interf
 
 #include "common/debug.h"
 #include "common/type/string.h"
+#include "mysql/client.h"
 #include "storage/storage.h"
 
 /***********************************************************************************************************************************
@@ -141,6 +142,28 @@ FN_EXTERN bool mysqlPageChecksumValidate(
     const unsigned char *page, MysqlPageSize pageSize, MysqlPageChecksumAlgo algo, uint32_t pageNo);
 
 /***********************************************************************************************************************************
+Result of parsing the redo log file header's LOG_HEADER_CREATOR string (offset 16, 32 bytes max, NUL-terminated).
+
+Both MySQL and MariaDB write a vendor+version string here when they create a redo log file:
+  MySQL:    "MySQL X.Y.Z"               e.g. "MySQL 8.0.36"
+  MariaDB:  "MariaDB X.Y.Z-suffix"      e.g. "MariaDB 10.11.6"
+  Other:    "MEB X.Y.Z" (mysqlbackup), "MySQL Clone" (CLONE plugin), "Percona-XtraBackup" (xtrabackup)
+
+This gives us the exact version that LAST WROTE the redo log — strictly more authoritative than mysqld --version on the host,
+and unaffected by binary upgrades that haven't run a server yet.
+***********************************************************************************************************************************/
+typedef struct MysqlRedoCreator
+{
+    MysqlVendor vendor;                                                 // Detected from the prefix
+    unsigned int versionNum;                                            // Parsed X.Y.Z, packed as MAJOR*10000+MINOR*100+PATCH
+    String *raw;                                                        // The full creator string for logging
+} MysqlRedoCreator;
+
+// Read the LOG_HEADER_CREATOR string out of the redo log files under dataPath. Returns all-zero / NULL fields if no redo log
+// can be located (server has never run, or 8.0.30+ datadir with the dir not yet populated).
+FN_EXTERN MysqlRedoCreator mysqlRedoCreatorRead(const Storage *storage, const String *dataPath);
+
+/***********************************************************************************************************************************
 Macros for function logging
 ***********************************************************************************************************************************/
 FN_EXTERN void mysqlControlToLog(const MysqlControl *this, StringStatic *debugLog);
@@ -149,5 +172,12 @@ FN_EXTERN void mysqlControlToLog(const MysqlControl *this, StringStatic *debugLo
     MysqlControl
 #define FUNCTION_LOG_MY_CONTROL_FORMAT(value, buffer, bufferSize)                                                                  \
     FUNCTION_LOG_OBJECT_FORMAT(&value, mysqlControlToLog, buffer, bufferSize)
+
+FN_EXTERN void mysqlRedoCreatorToLog(const MysqlRedoCreator *this, StringStatic *debugLog);
+
+#define FUNCTION_LOG_MY_REDO_CREATOR_TYPE                                                                                          \
+    MysqlRedoCreator
+#define FUNCTION_LOG_MY_REDO_CREATOR_FORMAT(value, buffer, bufferSize)                                                             \
+    FUNCTION_LOG_OBJECT_FORMAT(&value, mysqlRedoCreatorToLog, buffer, bufferSize)
 
 #endif
