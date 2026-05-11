@@ -29,6 +29,10 @@ architectural decision that needs to land before the protocol extension is writt
 #include "command/backup/redoLog.h"
 #include "common/debug.h"
 #include "common/log.h"
+#include "common/type/string.h"
+#include "mysql/interface.h"
+#include "storage/iterator.h"
+#include "storage/storage.h"
 
 struct RedoLogCopier
 {
@@ -70,4 +74,75 @@ redoLogCopierJoin(RedoLogCopier *const this)
 {
     (void)this;
     THROW(AssertError, "TODO(myBackRest-D): redoLogCopierJoin — waitpid worker + propagate any worker error");
+}
+
+/**********************************************************************************************************************************/
+FN_EXTERN unsigned int
+redoLogColdCopy(
+    const Storage *const srcStorage, const String *const srcPath, const Storage *const dstStorage, const String *const dstPath)
+{
+    FUNCTION_LOG_BEGIN(logLevelDebug);
+        FUNCTION_LOG_PARAM(STORAGE, srcStorage);
+        FUNCTION_LOG_PARAM(STRING, srcPath);
+        FUNCTION_LOG_PARAM(STORAGE, dstStorage);
+        FUNCTION_LOG_PARAM(STRING, dstPath);
+    FUNCTION_LOG_END();
+
+    ASSERT(srcStorage != NULL);
+    ASSERT(srcPath != NULL);
+    ASSERT(dstStorage != NULL);
+    ASSERT(dstPath != NULL);
+
+    unsigned int copied = 0;
+
+    MEM_CONTEXT_TEMP_BEGIN()
+    {
+        // 8.0.30+ dynamic layout: every regular file under #innodb_redo/ gets copied, including the _tmp pre-allocated files —
+        // the restore target should look bit-identical to the source.
+        const String *const srcRedoDir = strNewFmt("%s/%s", strZ(srcPath), MYSQL_PATH_INNODB_REDO);
+        const String *const dstRedoDir = strNewFmt("%s/%s", strZ(dstPath), MYSQL_PATH_INNODB_REDO);
+
+        StorageIterator *const dirItr = storageNewItrP(
+            srcStorage, srcRedoDir, .level = storageInfoLevelType, .nullOnMissing = true);
+
+        if (dirItr != NULL)
+        {
+            while (storageItrMore(dirItr))
+            {
+                const StorageInfo entry = storageItrNext(dirItr);
+
+                if (!entry.exists || entry.type != storageTypeFile)
+                    continue;
+
+                const String *const srcFile = strNewFmt("%s/%s", strZ(srcRedoDir), strZ(entry.name));
+                const String *const dstFile = strNewFmt("%s/%s", strZ(dstRedoDir), strZ(entry.name));
+
+                storageCopyP(storageNewReadP(srcStorage, srcFile), storageNewWriteP(dstStorage, dstFile));
+                copied++;
+            }
+        }
+
+        // Fixed layout: ib_logfile0..1 at the datadir root. Try both even on MariaDB 10.5+ (single-file) — the loop simply
+        // skips the missing one. ib_logfile1 is only present on pre-8.0.30 servers with innodb_log_files_in_group >= 2.
+        for (unsigned int n = 0; n < 2; n++)
+        {
+            const String *const fileName = strNewFmt("%s%u", MYSQL_FILE_IB_LOGFILE_PREFIX, n);
+            const String *const srcFile = strNewFmt("%s/%s", strZ(srcPath), strZ(fileName));
+
+            if (!storageExistsP(srcStorage, srcFile))
+                continue;
+
+            const String *const dstFile = strNewFmt("%s/%s", strZ(dstPath), strZ(fileName));
+            storageCopyP(storageNewReadP(srcStorage, srcFile), storageNewWriteP(dstStorage, dstFile));
+            copied++;
+        }
+
+        if (copied == 0)
+            LOG_INFO("redo log: no files found (datadir may predate server bootstrap)");
+        else
+            LOG_INFO_FMT("redo log: copied %u file(s)", copied);
+    }
+    MEM_CONTEXT_TEMP_END();
+
+    FUNCTION_LOG_RETURN(UINT, copied);
 }

@@ -44,4 +44,22 @@ redoLogCopierFree(RedoLogCopier *const this)
     objFree(this);
 }
 
+/***********************************************************************************************************************************
+Cold-mode redo log copy
+
+Used when the server is known to be shut down (offline backup). With no writer touching the redo log, a flat file copy is safe
+and consistent — no concurrency, no protocol-worker plumbing, no stop-at-LSN signalling.
+
+Handles both layouts the live datadir might have:
+  - 5.7 / 8.0.0..8.0.29     <datadir>/ib_logfile0, ib_logfile1
+  - 8.0.30+                  <datadir>/#innodb_redo/#ib_redoN_<lsn>
+  - MariaDB 10.5+            <datadir>/ib_logfile0 (single file)
+
+The destination preserves the same relative path: ib_logfile0 stays at the root, dynamic-format files go under #innodb_redo/.
+Returns the number of files copied; emits LOG_INFO summarizing the result. Missing redo files are silently skipped — a brand-new
+datadir before any server start has none.
+***********************************************************************************************************************************/
+FN_EXTERN unsigned int redoLogColdCopy(
+    const Storage *srcStorage, const String *srcPath, const Storage *dstStorage, const String *dstPath);
+
 #endif

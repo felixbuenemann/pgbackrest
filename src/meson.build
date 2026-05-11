@@ -243,6 +243,7 @@ src_mybackrest = [
     'mysql/binary.c',
     'mysql/binlog.c',
     'mysql/client.c',
+    'mysql/coldBackup.c',
     'mysql/datadir.c',
     'mysql/engine/aria.c',
     'mysql/engine/engine.c',
@@ -407,5 +408,11 @@ executable(
 executable(
     'standalone-compat-check-test',
     src_common, src_mybackrest, files('../test/src/standalone/compatCheckTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+executable(
+    'standalone-cold-backup-test',
+    src_common, src_mybackrest, files('../test/src/standalone/coldBackupTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
