@@ -200,14 +200,21 @@ prepareVerifyCompatibility(
         // 2. Probe the operator's mysqld binary
         MysqlBinaryInfo *const probe = mysqlBinaryProbe(mysqldPath);
 
-        // 3. Run the compatibility check
+        // 3. Run the vendor + version compatibility check
         String *const issue = mysqlBinaryCheckCompatibility(probe, manifest->info->vendor, manifest->info->versionNum);
+
+        // 3b. Redo-format compatibility (separate check — a same-major-version match can still fail if the backup uses a
+        //     redo format the older patch-level binary doesn't know about).
+        String *const redoIssue = mysqlBinaryCheckRedoCompat(probe, manifest->info->redoFormatNum);
+
+        if (redoIssue != NULL)
+            THROW_FMT(OptionInvalidError, "redo-format compatibility FAILED: %s", strZ(redoIssue));
 
         if (issue == NULL)
         {
             LOG_INFO_FMT(
-                "compatibility check OK: backup vendor=%u version=%u ↔ binary vendor=%u version=%u",
-                (unsigned int)manifest->info->vendor, manifest->info->versionNum,
+                "compatibility check OK: backup vendor=%u version=%u redoFormat=%u ↔ binary vendor=%u version=%u",
+                (unsigned int)manifest->info->vendor, manifest->info->versionNum, manifest->info->redoFormatNum,
                 (unsigned int)probe->vendor, probe->versionNum);
         }
         else

@@ -150,6 +150,28 @@ main(void)
 
         expect("MySQL 5.7 binary for 8.0 backup → throws (DD downgrade unsupported)", threw);
 
+        // ---- Test 4b: backup with redo format 6 (8.0.30+) on 5.7 binary → throws redo-format incompat ----
+        // Re-write manifest with redoFormatNum=6 to trigger the redo-format check
+        info.redoFormatNum = 6;
+        mysqlBackupManifestWrite(storage, STRDEF("."), &info, NULL);
+
+        threw = false;
+        TRY_BEGIN()
+        {
+            prepareVerifyCompatibility(storage, STRDEF("."), STR(mysql57), false);
+        }
+        CATCH(OptionInvalidError)
+        {
+            threw = true;
+        }
+        TRY_END();
+
+        expect("MySQL 5.7 binary, backup redoFormat=6 → throws redo-format incompat", threw);
+
+        // Reset manifest for next test
+        info.redoFormatNum = 0;
+        mysqlBackupManifestWrite(storage, STRDEF("."), &info, NULL);
+
         // ---- Test 5: missing manifest → throws FileMissingError ----
         unlink("/tmp/mybackrest-compat-test/mybackrest_backup_info");
 
