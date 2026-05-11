@@ -87,6 +87,10 @@ typedef struct MysqlDataDirInfo
 // Inspect the datadir at dataPath. Always returns a non-NULL struct (zero-valued fields mean "not detected").
 FN_EXTERN MysqlDataDirInfo *mysqlDataDirInspect(const Storage *storage, const String *dataPath);
 
+// Render a multi-line human-readable summary of the inspector result. Suitable for backup logs (LOG_INFO_FMT'd line by line)
+// or the eventual `mybackrest inspect <datadir>` CLI output. Pure formatting — no side effects.
+FN_EXTERN String *mysqlDataDirSummarize(const MysqlDataDirInfo *info);
+
 /***********************************************************************************************************************************
 Macros for function logging
 ***********************************************************************************************************************************/

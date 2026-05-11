@@ -449,6 +449,29 @@ main(void)
         expect("[Galera] seqno extracted", infoGalera->galeraSeqno == 987654321);
 
         // ============================================================================================================================
+        // Scenario 6f: human-readable summary
+        // ============================================================================================================================
+        rmrf(root); mkdirP(root);
+        writeMinimalIbdata1("/tmp/mybackrest-datadir-test/ibdata1");
+        writeRedoWithCreator("/tmp/mybackrest-datadir-test/ib_logfile0", "MariaDB 10.11.6-MariaDB-0+deb12u1");
+        touch("/tmp/mybackrest-datadir-test/aria_log_control", "");
+        writeAutoCnf("/tmp/mybackrest-datadir-test/auto.cnf", "11111111-2222-3333-4444-555555555555");
+
+        MysqlDataDirInfo *infoSum = mysqlDataDirInspect(storage, STRDEF("."));
+        const String *const summary = mysqlDataDirSummarize(infoSum);
+        const char *const sz = strZ(summary);
+
+        printf("\n--- Sample summary output ---\n%s---\n", sz);
+
+        expect("[summary] contains DETECTED line", strstr(sz, "DETECTED") != NULL);
+        expect("[summary] mentions MariaDB vendor", strstr(sz, "MariaDB") != NULL);
+        expect("[summary] mentions InnoDB section", strstr(sz, "InnoDB") != NULL);
+        expect("[summary] mentions Engines section", strstr(sz, "Engines") != NULL);
+        expect("[summary] mentions aria engine", strstr(sz, "aria") != NULL);
+        expect("[summary] includes server-uuid", strstr(sz, "11111111-2222-3333-4444-555555555555") != NULL);
+        expect("[summary] reports exact version (creator string parsed)", strstr(sz, "exact via redo log creator") != NULL);
+
+        // ============================================================================================================================
         // Scenario 7: empty / non-MySQL directory — must not throw, must return all-zero
         // ============================================================================================================================
         rmrf(root);

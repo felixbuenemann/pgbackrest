@@ -400,3 +400,131 @@ mysqlDataDirInfoToLog(const MysqlDataDirInfo *const this, StringStatic *const de
         this->hasInnodb ? "y" : "n", this->hasMyisam ? "y" : "n", this->hasAria ? "y" : "n",
         this->hasMyrocks ? "y" : "n", this->hasTokudb ? "y" : "n");
 }
+
+/***********************************************************************************************************************************
+Render a vendor enum as a human-readable string for the summary
+***********************************************************************************************************************************/
+static const char *
+summarizeVendor(const MysqlVendor v)
+{
+    switch (v)
+    {
+        case mysqlVendorMysql:   return "MySQL Community";
+        case mysqlVendorMariadb: return "MariaDB";
+        case mysqlVendorPercona: return "Percona Server";
+        case mysqlVendorUnknown: default: return "(unknown)";
+    }
+}
+
+/***********************************************************************************************************************************
+Render the version number as M.m.p (e.g., 80036 → "8.0.36"). Returns "(unknown)" for 0.
+***********************************************************************************************************************************/
+static String *
+summarizeVersion(const unsigned int v)
+{
+    if (v == 0)
+        return strNewZ("(unknown)");
+
+    return strNewFmt("%u.%u.%u", v / 10000, (v / 100) % 100, v % 100);
+}
+
+/**********************************************************************************************************************************/
+FN_EXTERN String *
+mysqlDataDirSummarize(const MysqlDataDirInfo *const info)
+{
+    FUNCTION_LOG_BEGIN(logLevelDebug);
+        FUNCTION_LOG_PARAM(MY_DATADIR_INFO, info);
+    FUNCTION_LOG_END();
+
+    ASSERT(info != NULL);
+
+    String *result = NULL;
+
+    MEM_CONTEXT_TEMP_BEGIN()
+    {
+        String *const out = strNew();
+        const String *const versionStr = summarizeVersion(info->versionNum);
+
+        // Top line — vendor + version + exactness
+        strCatFmt(
+            out,
+            "DETECTED  %s %s%s\n",
+            summarizeVendor(info->vendor),
+            strZ(versionStr),
+            info->versionExact ? "  [exact via redo log creator]" : "  [inferred from filesystem]");
+
+        if (info->serverUuid != NULL)
+            strCatFmt(out, "          server-uuid: %s\n", strZ(info->serverUuid));
+
+        // InnoDB layout
+        if (info->hasInnodb)
+        {
+            const char *const layoutName =
+                info->redoLayout == mysqlRedoLayoutFixedIbLogfile      ? "ib_logfile{0,1} (pre-8.0.30)" :
+                info->redoLayout == mysqlRedoLayoutDynamicInnodbRedo   ? "#innodb_redo/ (8.0.30+)" :
+                info->redoLayout == mysqlRedoLayoutMariaDb107          ? "MariaDB 10.5+" : "(unknown)";
+
+            const char *const checksumName =
+                info->pageChecksum == mysqlPageChecksumCrc32       ? "crc32" :
+                info->pageChecksum == mysqlPageChecksumStrictCrc32 ? "strict_crc32" :
+                info->pageChecksum == mysqlPageChecksumInnodb      ? "innodb (legacy)" :
+                info->pageChecksum == mysqlPageChecksumFullCrc32   ? "full_crc32 (MariaDB)" :
+                                                                     "(probe at copy time)";
+
+            strCatFmt(
+                out,
+                "InnoDB    page-size: %u, file-format: %s, checksum: %s, redo-layout: %s",
+                (unsigned int)info->pageSize,
+                info->antelope ? "Antelope" : "Barracuda+",
+                checksumName,
+                layoutName);
+
+            if (info->redoFormatNum != 0)
+            {
+                strCatFmt(out, ", redo-format: 0x%08x", info->redoFormatNum);
+                if (info->encryptedRedo)
+                    strCatZ(out, " [ENCRYPTED]");
+            }
+
+            strCatChr(out, '\n');
+
+            if (info->encrypted)
+                strCatZ(out, "          ENCRYPTION enabled — keyring required at restore\n");
+
+            if (info->zipSsize > 0)
+                strCatFmt(out, "          compressed-pages possible (zip_ssize=%u)\n", info->zipSsize);
+        }
+
+        // Engine summary line
+        strCatZ(out, "Engines  ");
+
+        bool any = false;
+        if (info->hasInnodb)  { strCatFmt(out, " innodb%s",  any ? "" : ""); any = true; }
+        if (info->hasMyisam)  { strCatZ(out,  any ? ", myisam"  : "myisam");  any = true; }
+        if (info->hasIsam)    { strCatZ(out,  any ? ", isam"    : "isam");    any = true; }
+        if (info->hasAria)    { strCatZ(out,  any ? ", aria"    : "aria");    any = true; }
+        if (info->hasMyrocks) { strCatZ(out,  any ? ", myrocks" : "myrocks"); any = true; }
+        if (info->hasTokudb)  { strCatZ(out,  any ? ", tokudb"  : "tokudb");  any = true; }
+        if (!any) strCatZ(out, " (none detected)");
+        strCatChr(out, '\n');
+
+        // Galera summary
+        if (info->hasGalera)
+        {
+            strCatFmt(
+                out,
+                "Galera    cluster member; state-uuid: %s, last-seqno: %" PRId64 "\n",
+                info->galeraStateUuid != NULL ? strZ(info->galeraStateUuid) : "(unknown)",
+                info->galeraSeqno);
+        }
+
+        MEM_CONTEXT_PRIOR_BEGIN()
+        {
+            result = strDup(out);
+        }
+        MEM_CONTEXT_PRIOR_END();
+    }
+    MEM_CONTEXT_TEMP_END();
+
+    FUNCTION_LOG_RETURN(STRING, result);
+}
