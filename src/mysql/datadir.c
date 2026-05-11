@@ -93,6 +93,165 @@ dataDirReadGalera(const Storage *const storage, const String *const dataPath, My
 }
 
 /***********************************************************************************************************************************
+Top-level scan: walk dataPath once, set engine/vendor flags from filename and directory markers, and collect the list of schema
+subdirectories for the second pass. Returns whether ibdata1 / mysql.ibd were seen — needed to choose which file to probe.
+***********************************************************************************************************************************/
+typedef struct DataDirTopLevelScan
+{
+    StringList *schemaDirs;
+    bool sawIbdata;
+    bool sawMysqlIbd;
+} DataDirTopLevelScan;
+
+static DataDirTopLevelScan
+dataDirScanTopLevel(const Storage *const storage, const String *const dataPath, MysqlDataDirInfo *const info)
+{
+    DataDirTopLevelScan result = {.schemaDirs = strLstNew()};
+
+    StorageIterator *const topItr = storageNewItrP(storage, dataPath, .level = storageInfoLevelType);
+
+    while (storageItrMore(topItr))
+    {
+        const StorageInfo entry = storageItrNext(topItr);
+
+        if (!entry.exists)
+            continue;
+
+        if (entry.type == storageTypeFile)
+        {
+            if (strBeginsWithZ(entry.name, "ibdata"))
+            {
+                result.sawIbdata = true;
+                info->hasInnodb = true;
+            }
+            else if (strEqZ(entry.name, MYSQL_FILE_MYSQL_IBD))
+            {
+                result.sawMysqlIbd = true;
+                info->hasInnodb = true;
+                mysqlDataDirRaiseVersion(info, 80000);                              // mysql.ibd → 8.0+ data dictionary
+            }
+            else if (strEqZ(entry.name, "aria_log_control") || strBeginsWithZ(entry.name, "aria_log."))
+            {
+                info->hasAria = true;
+                info->vendor = mysqlVendorMariadb;
+            }
+            else if (strBeginsWithZ(entry.name, "audit.log"))
+            {
+                if (info->vendor == mysqlVendorUnknown)
+                    info->vendor = mysqlVendorPercona;
+            }
+            else if (strEqZ(entry.name, "tokudb.environment") || strEqZ(entry.name, "tokudb.directory") ||
+                     strEqZ(entry.name, "tokudb.rollback"))
+            {
+                info->hasTokudb = true;
+            }
+            else if (strEndsWithZ(entry.name, ".tokudb"))
+            {
+                info->hasTokudb = true;
+            }
+            else if (strEqZ(entry.name, "grastate.dat") || strEqZ(entry.name, "gvwstate.dat"))
+            {
+                // Default vendor when only the Galera signal is seen — both MariaDB Galera Cluster and Percona XtraDB Cluster
+                // write these files; we can't disambiguate from the file alone. Don't override if a more specific signal
+                // already set vendor.
+                info->hasGalera = true;
+            }
+        }
+        else if (entry.type == storageTypePath)
+        {
+            if (strEqZ(entry.name, MYSQL_PATH_INNODB_REDO))
+            {
+                info->hasInnodb = true;
+                info->redoLayout = mysqlRedoLayoutDynamicInnodbRedo;
+                mysqlDataDirRaiseVersion(info, 80030);                              // #innodb_redo/ → 8.0.30+
+            }
+            else if (strEqZ(entry.name, ".rocksdb"))
+            {
+                info->hasMyrocks = true;
+                if (info->vendor == mysqlVendorUnknown)
+                    info->vendor = mysqlVendorPercona;                              // .rocksdb (no hash prefix) is Percona convention
+            }
+            else if (strEqZ(entry.name, "#rocksdb"))
+            {
+                info->hasMyrocks = true;
+                info->vendor = mysqlVendorMariadb;                                  // #rocksdb (hash prefix) is mariabackup convention
+            }
+            else if (strSize(entry.name) > 0 && strZ(entry.name)[0] != '.' && !strEqZ(entry.name, "lost+found") &&
+                     !strEqZ(entry.name, MYSQL_PATH_INNODB_DBLWR) && !strEqZ(entry.name, MYSQL_PATH_INNODB_REDO))
+            {
+                // The presence of certain schema dirs is itself a version signal — raise here so empty dirs still count.
+                if (strEqZ(entry.name, "sys"))
+                    mysqlDataDirRaiseVersion(info, 50700);                          // sys schema introduced in MySQL 5.7
+                else if (strEqZ(entry.name, "performance_schema"))
+                    mysqlDataDirRaiseVersion(info, 50500);                          // performance_schema introduced in 5.5
+
+                strLstAdd(result.schemaDirs, entry.name);
+            }
+        }
+    }
+
+    return result;
+}
+
+/***********************************************************************************************************************************
+Per-schema scan: walk each schema subdir collected by the top-level pass and refine engine flags from per-table file extensions
+(.ibd / .MYD / .ISD / .MAD) and a few mysql-schema-specific signals (gtid_executed → 5.6.5+).
+***********************************************************************************************************************************/
+static void
+dataDirScanSchemas(
+    const Storage *const storage, const String *const dataPath, const StringList *const schemaDirs,
+    MysqlDataDirInfo *const info)
+{
+    for (unsigned int i = 0; i < strLstSize(schemaDirs); i++)
+    {
+        const String *const schema = strLstGet(schemaDirs, i);
+        const String *const schemaPath = strNewFmt("%s/%s", strZ(dataPath), strZ(schema));
+
+        StorageIterator *const itr = storageNewItrP(
+            storage, schemaPath, .level = storageInfoLevelType, .nullOnMissing = true);
+
+        if (itr == NULL)
+            continue;
+
+        while (storageItrMore(itr))
+        {
+            const StorageInfo file = storageItrNext(itr);
+
+            if (!file.exists || file.type != storageTypeFile)
+                continue;
+
+            if (strEndsWithZ(file.name, ".ibd"))
+            {
+                info->hasInnodb = true;
+            }
+            else if (strEndsWithZ(file.name, ".MYD") || strEndsWithZ(file.name, ".MYI"))
+            {
+                info->hasMyisam = true;
+            }
+            else if (strEndsWithZ(file.name, ".ISD") || strEndsWithZ(file.name, ".ISM"))
+            {
+                info->hasIsam = true;                                               // MySQL 3.21 → 4.0.2 — predates MyISAM
+            }
+            else if (strEndsWithZ(file.name, ".MAD") || strEndsWithZ(file.name, ".MAI"))
+            {
+                info->hasAria = true;
+                info->vendor = mysqlVendorMariadb;
+            }
+            else if (strEqZ(schema, "mysql") &&
+                     (strBeginsWithZ(file.name, "gtid_executed.") || strBeginsWithZ(file.name, "gtid_slave_pos.")))
+            {
+                // mysql/gtid_executed.frm/.ibd was added in 5.6.5; mysql/gtid_slave_pos in MariaDB 10.0
+                mysqlDataDirRaiseVersion(info, 50605);
+            }
+            else if (strEqZ(schema, "sys"))
+            {
+                mysqlDataDirRaiseVersion(info, 50700);                              // sys schema → 5.7+
+            }
+        }
+    }
+}
+
+/***********************************************************************************************************************************
 Read <dataPath>/auto.cnf for the server UUID. Allocates the result string in the parent context (the caller's info struct lives
 there). Silently tolerates a missing or malformed file.
 ***********************************************************************************************************************************/
@@ -228,160 +387,17 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
         MEM_CONTEXT_PRIOR_END();
 
         // Pass 1: top level — collect markers + remember schema-looking dirs for pass 2
-        StringList *const schemaDirs = strLstNew();
-        bool sawIbdata = false;
-        bool sawMysqlIbd = false;
-        bool sawAriaControl = false;
-        bool sawAuditLog = false;
-        bool sawTokudbEnv = false;
+        const DataDirTopLevelScan scan = dataDirScanTopLevel(storage, dataPath, info);
 
-        StorageIterator *const topItr = storageNewItrP(storage, dataPath, .level = storageInfoLevelType);
-
-        while (storageItrMore(topItr))
-        {
-            const StorageInfo entry = storageItrNext(topItr);
-
-            if (!entry.exists)
-                continue;
-
-            if (entry.type == storageTypeFile)
-            {
-                if (strBeginsWithZ(entry.name, "ibdata"))
-                {
-                    sawIbdata = true;
-                    info->hasInnodb = true;
-                }
-                else if (strEqZ(entry.name, MYSQL_FILE_MYSQL_IBD))
-                {
-                    sawMysqlIbd = true;
-                    info->hasInnodb = true;
-                    // mysql.ibd → 8.0+ data dictionary
-                    mysqlDataDirRaiseVersion(info, 80000);
-                }
-                else if (strEqZ(entry.name, "aria_log_control") || strBeginsWithZ(entry.name, "aria_log."))
-                {
-                    sawAriaControl = true;
-                    info->hasAria = true;
-                    info->vendor = mysqlVendorMariadb;
-                }
-                else if (strBeginsWithZ(entry.name, "audit.log"))
-                {
-                    sawAuditLog = true;
-                    if (info->vendor == mysqlVendorUnknown)
-                        info->vendor = mysqlVendorPercona;
-                }
-                else if (strEqZ(entry.name, "tokudb.environment") || strEqZ(entry.name, "tokudb.directory") ||
-                         strEqZ(entry.name, "tokudb.rollback"))
-                {
-                    sawTokudbEnv = true;
-                    info->hasTokudb = true;
-                }
-                else if (strEndsWithZ(entry.name, ".tokudb"))
-                {
-                    info->hasTokudb = true;
-                }
-                else if (strEqZ(entry.name, "grastate.dat") || strEqZ(entry.name, "gvwstate.dat"))
-                {
-                    info->hasGalera = true;
-                    // Default vendor when only the Galera signal is seen — both MariaDB Galera Cluster and Percona XtraDB
-                    // Cluster write these files; we can't disambiguate from the file alone. Don't override if a more
-                    // specific signal already set vendor.
-                }
-            }
-            else if (entry.type == storageTypePath)
-            {
-                if (strEqZ(entry.name, MYSQL_PATH_INNODB_REDO))
-                {
-                    info->hasInnodb = true;
-                    info->redoLayout = mysqlRedoLayoutDynamicInnodbRedo;
-                    // #innodb_redo/ → 8.0.30+
-                    mysqlDataDirRaiseVersion(info, 80030);
-                }
-                else if (strEqZ(entry.name, ".rocksdb"))
-                {
-                    info->hasMyrocks = true;
-                    if (info->vendor == mysqlVendorUnknown)
-                        info->vendor = mysqlVendorPercona;                        // .rocksdb (no hash prefix) is Percona convention
-                }
-                else if (strEqZ(entry.name, "#rocksdb"))
-                {
-                    info->hasMyrocks = true;
-                    info->vendor = mysqlVendorMariadb;                            // #rocksdb (hash prefix) is mariabackup convention
-                }
-                else if (strSize(entry.name) > 0 && strZ(entry.name)[0] != '.' && !strEqZ(entry.name, "lost+found") &&
-                         !strEqZ(entry.name, MYSQL_PATH_INNODB_DBLWR) && !strEqZ(entry.name, MYSQL_PATH_INNODB_REDO))
-                {
-                    // The presence of certain schema dirs is itself a version signal — raise here so empty dirs still count.
-                    if (strEqZ(entry.name, "sys"))
-                        mysqlDataDirRaiseVersion(info, 50700);          // sys schema introduced in MySQL 5.7
-                    else if (strEqZ(entry.name, "performance_schema"))
-                        mysqlDataDirRaiseVersion(info, 50500);          // performance_schema introduced in 5.5
-
-                    strLstAdd(schemaDirs, entry.name);
-                }
-            }
-        }
-
-        // Pass 2: per-schema markers — InnoDB (.ibd), MyISAM (.MYD), Aria (.MAD/.MAI), and 5.6 GTID artifact (mysql/gtid_executed.*)
-        for (unsigned int i = 0; i < strLstSize(schemaDirs); i++)
-        {
-            const String *const schema = strLstGet(schemaDirs, i);
-            const String *const schemaPath = strNewFmt("%s/%s", strZ(dataPath), strZ(schema));
-
-            StorageIterator *const itr = storageNewItrP(
-                storage, schemaPath, .level = storageInfoLevelType, .nullOnMissing = true);
-
-            if (itr == NULL)
-                continue;
-
-            while (storageItrMore(itr))
-            {
-                const StorageInfo file = storageItrNext(itr);
-
-                if (!file.exists || file.type != storageTypeFile)
-                    continue;
-
-                if (strEndsWithZ(file.name, ".ibd"))
-                {
-                    info->hasInnodb = true;
-                }
-                else if (strEndsWithZ(file.name, ".MYD") || strEndsWithZ(file.name, ".MYI"))
-                {
-                    info->hasMyisam = true;
-                }
-                else if (strEndsWithZ(file.name, ".ISD") || strEndsWithZ(file.name, ".ISM"))
-                {
-                    info->hasIsam = true;                               // MySQL 3.21 → 4.0.2 — predates MyISAM
-                }
-                else if (strEndsWithZ(file.name, ".MAD") || strEndsWithZ(file.name, ".MAI"))
-                {
-                    info->hasAria = true;
-                    info->vendor = mysqlVendorMariadb;
-                }
-                else if (strEqZ(schema, "mysql") &&
-                         (strBeginsWithZ(file.name, "gtid_executed.") || strBeginsWithZ(file.name, "gtid_slave_pos.")))
-                {
-                    // mysql/gtid_executed.frm/.ibd was added in 5.6.5; mysql/gtid_slave_pos in MariaDB 10.0
-                    mysqlDataDirRaiseVersion(info, 50605);
-                }
-                else if (strEqZ(schema, "sys"))
-                {
-                    // sys schema → 5.7+
-                    mysqlDataDirRaiseVersion(info, 50700);
-                }
-            }
-
-            // 5.7-vs-pre check: any .frm files alongside .ibd in a schema dir means pre-8.0
-            // (8.0+ removed .frm; schema lives in mysql.ibd's SDI). If we already raised to 80000+ this is a contradiction
-            // we shouldn't lower; keep the higher value.
-        }
+        // Pass 2: per-schema markers — InnoDB (.ibd), MyISAM (.MYD), ISAM (.ISD), Aria (.MAD/.MAI), 5.6 GTID artifact
+        dataDirScanSchemas(storage, dataPath, scan.schemaDirs, info);
 
         // Server UUID via auto.cnf
         dataDirReadAutoCnf(storage, dataPath, info);
 
         // InnoDB tablespace details when present
-        if (sawIbdata || sawMysqlIbd)
-            dataDirProbeInnodb(storage, dataPath, sawIbdata, sawMysqlIbd, info);
+        if (scan.sawIbdata || scan.sawMysqlIbd)
+            dataDirProbeInnodb(storage, dataPath, scan.sawIbdata, scan.sawMysqlIbd, info);
 
         // Redo layout (if not already set by #innodb_redo dir presence)
         if (info->redoLayout == mysqlRedoLayoutUnknown && info->hasInnodb)
@@ -403,11 +419,6 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
         // If we still haven't set vendor, default to MySQL
         if (info->vendor == mysqlVendorUnknown && info->hasInnodb)
             info->vendor = mysqlVendorMysql;
-
-        // Suppress unused-variable warnings — these are kept for future refinements
-        (void)sawAriaControl;
-        (void)sawAuditLog;
-        (void)sawTokudbEnv;
     }
     MEM_CONTEXT_TEMP_END();
 
