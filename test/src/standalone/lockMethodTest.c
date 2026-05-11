@@ -79,6 +79,15 @@ main(void)
             c = makeFakeClient(mysqlVendorMysql, 50562);
             expect("MySQL 5.5.62 → ftwrl", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodFtwrl);
 
+            c = makeFakeClient(mysqlVendorMysql, 50196);
+            expect("MySQL 5.0.96 (pre-Plugin Antelope) → ftwrl", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodFtwrl);
+
+            c = makeFakeClient(mysqlVendorMysql, 40128);
+            expect("MySQL 4.1.28 → ftwrl (lowest practical floor)", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodFtwrl);
+
+            c = makeFakeClient(mysqlVendorMysql, 40031);
+            expect("MySQL 4.0.31 → ftwrl (auto-retry handles old password)", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodFtwrl);
+
             c = makeFakeClient(mysqlVendorPercona, 80016);
             expect("Percona 8.0.16 → instance", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodInstance);
 
