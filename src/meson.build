@@ -240,6 +240,7 @@ src_mybackrest = [
     'info/infoBackup.c',
     'info/infoPg.c',
     'info/manifest/manifest.c',
+    'mysql/binary.c',
     'mysql/binlog.c',
     'mysql/client.c',
     'mysql/engine/aria.c',
@@ -373,5 +374,11 @@ executable(
 executable(
     'standalone-toku-engine-test',
     src_common, src_mybackrest, files('../test/src/standalone/tokuEngineTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+executable(
+    'standalone-binary-probe-test',
+    src_common, src_mybackrest, files('../test/src/standalone/binaryProbeTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )

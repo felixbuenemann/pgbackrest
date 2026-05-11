@@ -18,6 +18,7 @@ SHUTDOWN. No GPLv2 InnoDB recovery code is linked into the MIT mybackrest binary
 #include "common/type/buffer.h"
 #include "common/type/string.h"
 #include "common/type/stringList.h"
+#include "mysql/binary.h"
 
 #define MYBACKREST_RECOVERY_CNF                                     "mybackrest_recovery.cnf"
 #define MYBACKREST_RECOVERY_SQL                                     "mybackrest_recovery.sql"
@@ -93,6 +94,15 @@ prepareInvokeMysqld(const String *const mysqldPath, const String *const restoreP
 
     MEM_CONTEXT_TEMP_BEGIN()
     {
+        // Probe the binary up front so we surface vendor/version into the log before mysqld starts churning. Compatibility
+        // checking against the backup's recorded source vendor/version belongs in the caller (it has the manifest); here we
+        // just log what we found.
+        MysqlBinaryInfo *const binInfo = mysqlBinaryProbe(mysqldPath);
+        LOG_INFO_FMT(
+            "recovery binary: %s — vendor=%u version=%u (%s)",
+            strZ(mysqldPath), (unsigned int)binInfo->vendor, binInfo->versionNum,
+            binInfo->versionRaw != NULL ? strZ(binInfo->versionRaw) : "(unparsed)");
+
         // Build argv: [mysqld, --defaults-file=<restorePath>/mybackrest_recovery.cnf]. Use the long-form so the path is
         // unambiguous; mysqld parses it the same on MySQL and MariaDB.
         StringList *const argv = strLstNew();
