@@ -75,4 +75,20 @@ Lookup by engine name as reported by INFORMATION_SCHEMA.ENGINES.ENGINE (case-ins
 ***********************************************************************************************************************************/
 FN_EXTERN const EngineHandler *engineHandlerLookup(const String *engineName);
 
+/***********************************************************************************************************************************
+Shared helper used by the simple per-schema flat-copy engines (MyISAM, ISAM, Aria).
+
+Walks the datadir, identifies schema directories (top-level dirs with non-dot/non-lost+found names), then enumerates each schema
+for files ending in primaryExt. For every match it copies the file with primaryExt and the corresponding files with each
+companion extension (NULL-terminated list). Copies stream through storageCopyP so memory stays bounded regardless of file size.
+
+  primaryExt   ".MYD" / ".ISD" / ".MAD"
+  companions   {".MYI", ".frm", NULL}
+  logLabel     "MyISAM" / "ISAM" / "Aria" — used for the LOG_INFO summary line
+
+The .frm companion is optional on 8.0+ — companions are tried with .ignoreMissing so silent skips are normal.
+***********************************************************************************************************************************/
+FN_EXTERN void engineFlatCopyByExtension(
+    EngineBackupCtx *ctx, const char *primaryExt, const char *const companionExts[], const char *logLabel);
+
 #endif

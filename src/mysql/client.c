@@ -297,9 +297,10 @@ Encode one MYSQL_ROW value into the running pack
 ***********************************************************************************************************************************/
 static void
 mysqlClientPackValue(
-    PackWrite *const pack, const enum enum_field_types fieldType, const char *const value, const unsigned long valueLen,
-    const unsigned int columnIdx, const String *const query)
+    PackWrite *const pack, const enum enum_field_types fieldType, const char *const value, const unsigned int columnIdx,
+    const String *const query)
 {
+    // NULL value: column is SQL NULL regardless of column type
     if (value == NULL)
     {
         pckWriteNullP(pack);
@@ -308,59 +309,26 @@ mysqlClientPackValue(
 
     switch (fieldType)
     {
-        // Boolean is reported as TINY(1) by MySQL. Treat MYSQL_TYPE_TINY as int and let callers cast if they want bool.
+        // Boolean is reported as TINY(1) by MySQL; callers cast if they want bool
         case MYSQL_TYPE_TINY:
         case MYSQL_TYPE_SHORT:
         case MYSQL_TYPE_INT24:
         case MYSQL_TYPE_LONG:
         case MYSQL_TYPE_YEAR:
             pckWriteI32P(pack, cvtZToInt(value), .defaultWrite = true);
-            break;
+            return;
 
         case MYSQL_TYPE_LONGLONG:
             pckWriteI64P(pack, cvtZToInt64(value), .defaultWrite = true);
-            break;
+            return;
 
-        case MYSQL_TYPE_NULL:
-            pckWriteNullP(pack);
-            break;
-
-        case MYSQL_TYPE_DECIMAL:
-        case MYSQL_TYPE_NEWDECIMAL:
-        case MYSQL_TYPE_FLOAT:
-        case MYSQL_TYPE_DOUBLE:
-        case MYSQL_TYPE_TIMESTAMP:
-        case MYSQL_TYPE_DATE:
-        case MYSQL_TYPE_TIME:
-        case MYSQL_TYPE_DATETIME:
-        case MYSQL_TYPE_NEWDATE:
-        case MYSQL_TYPE_VARCHAR:
-        case MYSQL_TYPE_VAR_STRING:
-        case MYSQL_TYPE_STRING:
-        case MYSQL_TYPE_ENUM:
-        case MYSQL_TYPE_SET:
-        case MYSQL_TYPE_JSON:
-        case MYSQL_TYPE_BIT:
-            // Strings come back zero-terminated and length-tagged; STR(value) creates a String referencing the libmariadb buffer.
-            // The pack copies the bytes immediately, so the temporary lifetime is fine.
-            (void)valueLen;
-            pckWriteStrP(pack, STR(value), .defaultWrite = true);
-            break;
-
-        // Binary types we currently surface as text. If callers ever need raw bytes we can extend the API.
-        case MYSQL_TYPE_TINY_BLOB:
-        case MYSQL_TYPE_MEDIUM_BLOB:
-        case MYSQL_TYPE_LONG_BLOB:
-        case MYSQL_TYPE_BLOB:
-        case MYSQL_TYPE_GEOMETRY:
-            pckWriteStrP(pack, STR(value), .defaultWrite = true);
-            break;
-
+        // Every remaining type is surfaced as text — including BLOBs, since callers that need raw bytes can extend later
         default:
-            THROW_FMT(
-                FormatError, "unable to parse mysql type %u in column %u for query '%s'", (unsigned int)fieldType, columnIdx,
-                strZ(query));
+            pckWriteStrP(pack, STR(value), .defaultWrite = true);
+            return;
     }
+
+    (void)columnIdx; (void)query;                                       // reachable only via a future case that doesn't return
 }
 
 /**********************************************************************************************************************************/
@@ -434,12 +402,9 @@ mysqlClientQuery(MysqlClient *const this, const String *const query, const Mysql
                     if (resultType == mysqlClientQueryResultAny)
                         pckWriteArrayBeginP(pack);
 
+                    (void)lengths;                                  // libmariadb's row values are NUL-terminated; STR() uses strlen
                     for (unsigned int columnIdx = 0; columnIdx < columnTotal; columnIdx++)
-                    {
-                        mysqlClientPackValue(
-                            pack, fields[columnIdx].type, row[columnIdx], lengths != NULL ? lengths[columnIdx] : 0, columnIdx,
-                            query);
-                    }
+                        mysqlClientPackValue(pack, fields[columnIdx].type, row[columnIdx], columnIdx, query);
 
                     if (resultType == mysqlClientQueryResultAny)
                         pckWriteArrayEndP(pack);

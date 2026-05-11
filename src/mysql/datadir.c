@@ -18,6 +18,7 @@ whether absence is acceptable for their use case.
 
 #include "common/debug.h"
 #include "common/log.h"
+#include "common/type/convert.h"
 #include "common/type/string.h"
 #include "common/type/stringList.h"
 #include "mysql/datadir.h"
@@ -357,12 +358,12 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
                         else if (strBeginsWithZ(line, "seqno:"))
                         {
                             const String *const seqStr = strTrim(strSubN(line, 6, strSize(line) - 6));
-                            info->galeraSeqno = strtoll(strZ(seqStr), NULL, 10);
+                            info->galeraSeqno = cvtZToInt64(strZ(seqStr));
                         }
                         else if (strBeginsWithZ(line, "safe_to_bootstrap:"))
                         {
                             const String *const stbStr = strTrim(strSubN(line, 18, strSize(line) - 18));
-                            info->safeToBootstrap = (int)strtol(strZ(stbStr), NULL, 10);
+                            info->safeToBootstrap = cvtZToInt(strZ(stbStr));
                         }
                     }
                 }
@@ -501,17 +502,31 @@ mysqlDataDirSummarize(const MysqlDataDirInfo *const info)
                 strCatFmt(out, "          compressed-pages possible (zip_ssize=%u)\n", info->zipSsize);
         }
 
-        // Engine summary line
-        strCatZ(out, "Engines  ");
+        // Engine summary line — comma-separated list of present engines (or "(none detected)" when empty)
+        strCatZ(out, "Engines   ");
 
-        bool any = false;
-        if (info->hasInnodb)  { strCatFmt(out, " innodb%s",  any ? "" : ""); any = true; }
-        if (info->hasMyisam)  { strCatZ(out,  any ? ", myisam"  : "myisam");  any = true; }
-        if (info->hasIsam)    { strCatZ(out,  any ? ", isam"    : "isam");    any = true; }
-        if (info->hasAria)    { strCatZ(out,  any ? ", aria"    : "aria");    any = true; }
-        if (info->hasMyrocks) { strCatZ(out,  any ? ", myrocks" : "myrocks"); any = true; }
-        if (info->hasTokudb)  { strCatZ(out,  any ? ", tokudb"  : "tokudb");  any = true; }
-        if (!any) strCatZ(out, " (none detected)");
+        const struct { bool present; const char *name; } engineRow[] = {
+            {info->hasInnodb,  "innodb"},
+            {info->hasMyisam,  "myisam"},
+            {info->hasIsam,    "isam"},
+            {info->hasAria,    "aria"},
+            {info->hasMyrocks, "myrocks"},
+            {info->hasTokudb,  "tokudb"},
+        };
+
+        bool first = true;
+        for (size_t i = 0; i < sizeof(engineRow) / sizeof(engineRow[0]); i++)
+        {
+            if (!engineRow[i].present)
+                continue;
+
+            strCatFmt(out, "%s%s", first ? "" : ", ", engineRow[i].name);
+            first = false;
+        }
+
+        if (first)
+            strCatZ(out, "(none detected)");
+
         strCatChr(out, '\n');
 
         // Galera summary

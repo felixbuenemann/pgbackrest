@@ -1,22 +1,18 @@
 /***********************************************************************************************************************************
 MyRocks / RocksDB Engine Module
 
-Online (with live server): RocksDB's checkpoint API (SET SESSION rocksdb_create_checkpoint='<path>') would snapshot the SSTs to
-a tmp directory; we'd then copy from there. That path is left as a stub because it requires the DB connection that Phase B's
-db.c rewrite hasn't delivered yet.
+Offline: walk both .rocksdb/ (Percona/MySQL) and #rocksdb/ (mariabackup convention), flat-copy every file into <backup>/#rocksdb/.
+SSTs are immutable once written so a cold-mode copy is consistent by construction.
 
-Offline (no live server, ctx->client == NULL): walk <datadir>/.rocksdb/ (Percona/MySQL convention) or <datadir>/#rocksdb/
-(MariaDB convention) and flat-copy every file. Output always goes under <backup>/#rocksdb/ so the restore path is identical
-across vendors.
+Online mode would issue `SET SESSION rocksdb_create_checkpoint = '<tmp>'` (Percona) or use mariabackup's `myrocks_checkpoint.create()`
+API; that path needs Phase B's MysqlClient orchestration not yet wired into EngineBackupCtx.
 
-Files copied as-is: *.sst, *.log, LOG, LOG.old.*, MANIFEST-*, CURRENT, OPTIONS-*, IDENTITY. RocksDB's SST files are immutable
-once written, so the offline copy is consistent by construction.
+Reference: mariabackup backup_copy.cc:has_rocksdb_plugin() line 2123, rocksdb_create_checkpoint() line 2269.
 ***********************************************************************************************************************************/
 #include <build.h>
 
 #include "common/debug.h"
 #include "common/log.h"
-#include "common/type/buffer.h"
 #include "common/type/string.h"
 #include "mysql/engine/rocksdb.h"
 #include "storage/iterator.h"
@@ -43,26 +39,14 @@ rocksdbCopyDir(const Storage *const srcStorage, const String *const srcSubdir, c
         if (!entry.exists || entry.type != storageTypeFile)
             continue;
 
-        // Source path: <srcSubdir>/<filename>; dest path always under <backup>/#rocksdb/
         const String *const srcPath = strNewFmt("%s/%s", strZ(srcSubdir), strZ(entry.name));
         const String *const dstPath = strNewFmt("%s/%s", ROCKSDB_BACKUP_SUBDIR, strZ(entry.name));
 
-        Buffer *const content = storageGetP(storageNewReadP(srcStorage, srcPath));
-        storagePutP(storageNewWriteP(dstStorage, dstPath), content);
-
+        storageCopyP(storageNewReadP(srcStorage, srcPath), storageNewWriteP(dstStorage, dstPath));
         copied++;
     }
 
     return copied;
-}
-
-/**********************************************************************************************************************************/
-static void
-engineRocksdbPrepare(EngineBackupCtx *const ctx)
-{
-    (void)ctx;
-    // For online mode this would issue: SET SESSION rocksdb_create_checkpoint = '<tmp_path>';
-    // Skipped in offline mode — the SST files are already immutable.
 }
 
 static void
@@ -72,15 +56,12 @@ engineRocksdbCopyOnline(EngineBackupCtx *const ctx)
     FUNCTION_LOG_END();
 
     ASSERT(ctx != NULL);
-    ASSERT(ctx->dataPath != NULL);
-    ASSERT(ctx->backupPath != NULL);
 
     MEM_CONTEXT_TEMP_BEGIN()
     {
         const Storage *const srcStorage = storagePosixNewP(ctx->dataPath);
         const Storage *const dstStorage = storagePosixNewP(ctx->backupPath, .write = true);
 
-        // Try both possible RocksDB data subdirs. A single datadir won't have both, but handling both keeps us vendor-agnostic.
         const unsigned int copiedDot = rocksdbCopyDir(srcStorage, STRDEF(".rocksdb"), dstStorage);
         const unsigned int copiedHash = rocksdbCopyDir(srcStorage, STRDEF("#rocksdb"), dstStorage);
 
@@ -100,22 +81,11 @@ engineRocksdbCopyOnline(EngineBackupCtx *const ctx)
     FUNCTION_LOG_RETURN_VOID();
 }
 
-static void
-engineRocksdbFinalize(EngineBackupCtx *const ctx)
-{
-    (void)ctx;
-    // For online mode this would drop the transient checkpoint dir created by SET SESSION rocksdb_create_checkpoint.
-    // Offline mode: nothing to clean up.
-}
-
 static const EngineHandler rocksdbHandler =
 {
     .kind = mysqlEngineMyrocks,
     .name = "rocksdb",
-    .prepare = engineRocksdbPrepare,
     .copyOnline = engineRocksdbCopyOnline,
-    .copyUnderLock = NULL,
-    .finalize = engineRocksdbFinalize,
 };
 
 FN_EXTERN const EngineHandler *
