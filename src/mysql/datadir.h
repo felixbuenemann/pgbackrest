@@ -57,6 +57,7 @@ typedef struct MysqlDataDirInfo
     // Engine presence flags — drive which handlers the cold-backup orchestrator runs
     bool hasInnodb;                                                     // any *.ibd / ibdata* / mysql.ibd
     bool hasMyisam;                                                     // any *.MYD
+    bool hasIsam;                                                       // any *.ISD — MySQL 3.21..4.0.2 only
     bool hasAria;                                                       // any *.MAD or aria_log_control
     bool hasMyrocks;                                                    // .rocksdb/ or #rocksdb/ subdir
     bool hasTokudb;                                                     // any *.tokudb or tokudb.environment

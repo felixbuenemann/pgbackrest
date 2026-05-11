@@ -33,6 +33,7 @@ typedef enum
     mysqlEngineInnodb,
     mysqlEngineXtradb,                                                  // Percona XtraDB; behaves identically to InnoDB
     mysqlEngineMyisam,
+    mysqlEngineIsam,                                                    // Predecessor to MyISAM; MySQL 3.21 → 4.0.2 only
     mysqlEngineAria,                                                    // MariaDB only
     mysqlEngineMyrocks,                                                 // MyRocks (Percona / MySQL)
     mysqlEngineRocksdb,                                                 // MariaDB-RocksDB

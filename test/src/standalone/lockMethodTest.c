@@ -91,6 +91,9 @@ main(void)
             c = makeFakeClient(mysqlVendorMysql, 32358);
             expect("MySQL 3.23.58 → ftwrl (first InnoDB+MyISAM+binlog release)", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodFtwrl);
 
+            c = makeFakeClient(mysqlVendorMysql, 32134);
+            expect("MySQL 3.21.34 → ftwrl (ISAM-era; lowest connector + engine floor)", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodFtwrl);
+
             c = makeFakeClient(mysqlVendorPercona, 80016);
             expect("Percona 8.0.16 → instance", mysqlLockMethodSelect(c, mysqlLockMethodAuto) == mysqlLockMethodInstance);
 

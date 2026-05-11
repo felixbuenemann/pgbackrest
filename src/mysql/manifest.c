@@ -114,6 +114,7 @@ mysqlBackupManifestRender(const MysqlDataDirInfo *const info, const MysqlBackupB
             "[engines]\n"
             "innodb = %s\n"
             "myisam = %s\n"
+            "isam = %s\n"
             "aria = %s\n"
             "myrocks = %s\n"
             "tokudb = %s\n",
@@ -132,6 +133,7 @@ mysqlBackupManifestRender(const MysqlDataDirInfo *const info, const MysqlBackupB
             info->serverUuid != NULL ? strZ(info->serverUuid) : "",
             info->hasInnodb ? "true" : "false",
             info->hasMyisam ? "true" : "false",
+            info->hasIsam ? "true" : "false",
             info->hasAria ? "true" : "false",
             info->hasMyrocks ? "true" : "false",
             info->hasTokudb ? "true" : "false");

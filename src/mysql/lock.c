@@ -26,14 +26,13 @@ Auto-detection rules in mysqlLockMethodSelect:
 // FLUSH TABLES WITH READ LOCK in mysqlLockBlockCommit. The connector handles pre-4.1 password hashes via the auto-retry path
 // in mysqlClientOpen.
 //
-// MINIMUM_SUPPORTED is set to MySQL 3.23 — that's when MyISAM and InnoDB both arrived as bundled engines. Earlier servers
-// (3.21, 3.22) used the older ISAM engine with .ISD/.ISM files which our MyISAM walker doesn't currently detect; supporting
-// them is a ~30-line file-extension addition. Pre-3.21 servers are rejected at the wire-protocol layer by the connector
-// itself (Protocol::HandshakeV10 minimum). Pre-3.23 servers also lack the binary log → no PITR.
+// MINIMUM_SUPPORTED is set to MySQL 3.21 — the connector's wire-protocol floor (Protocol::HandshakeV10). With ISAM engine
+// support added (engine/isam.c), we can now back up the .ISD/.ISM/.frm trio that pre-3.23 servers used. Pre-3.21 servers are
+// rejected at the wire-protocol layer by the connector itself (HandshakeV9). Pre-3.23 servers also lack the binary log → no PITR.
 //
 // "Practical" support is much narrower: 5.5 is the lowest version we exercise in test fixtures, and the lowest version
 // xtrabackup 2.4 ever supported. Anything older is "supportable in principle, rarely needed in practice".
-#define MYSQL_VERSION_MINIMUM_SUPPORTED                             32300       // MySQL 3.23 — first with InnoDB + MyISAM + binlog
+#define MYSQL_VERSION_MINIMUM_SUPPORTED                             32100       // MySQL 3.21 — Protocol::HandshakeV10 + ISAM
 #define MYSQL_VERSION_GTID_AVAILABLE                                50600       // GTID introduced in 5.6.0; pre-5.6 = file:pos PITR only
 #define MYSQL_VERSION_LOCK_INSTANCE                                 80016
 #define MARIADB_VERSION_BACKUP_STAGE                                100400

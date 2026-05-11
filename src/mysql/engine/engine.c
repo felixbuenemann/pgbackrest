@@ -18,6 +18,7 @@ fail loudly with a "no handler for engine X" message.
 #include "mysql/engine/aria.h"
 #include "mysql/engine/engine.h"
 #include "mysql/engine/innodb.h"
+#include "mysql/engine/isam.h"
 #include "mysql/engine/myisam.h"
 #include "mysql/engine/rocksdb.h"
 #include "mysql/engine/toku.h"
@@ -41,6 +42,9 @@ engineHandlerLookup(const String *const engineName)
 
     if (strEqZ(engineName, "MyISAM") || strEqZ(engineName, "MYISAM") || strEqZ(engineName, "myisam"))
         FUNCTION_TEST_RETURN_TYPE_CONST_P(EngineHandler, engineMyisamHandler());
+
+    if (strEqZ(engineName, "ISAM") || strEqZ(engineName, "isam"))
+        FUNCTION_TEST_RETURN_TYPE_CONST_P(EngineHandler, engineIsamHandler());
 
     if (strEqZ(engineName, "RocksDB") || strEqZ(engineName, "ROCKSDB") || strEqZ(engineName, "rocksdb") ||
         strEqZ(engineName, "MyRocks") || strEqZ(engineName, "MYROCKS") || strEqZ(engineName, "myrocks"))

@@ -247,6 +247,7 @@ src_mybackrest = [
     'mysql/engine/aria.c',
     'mysql/engine/engine.c',
     'mysql/engine/innodb.c',
+    'mysql/engine/isam.c',
     'mysql/engine/myisam.c',
     'mysql/engine/rocksdb.c',
     'mysql/engine/toku.c',
@@ -340,6 +341,12 @@ executable(
 executable(
     'standalone-myisam-engine-test',
     src_common, src_mybackrest, files('../test/src/standalone/myisamEngineTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+executable(
+    'standalone-isam-engine-test',
+    src_common, src_mybackrest, files('../test/src/standalone/isamEngineTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
 

@@ -182,6 +182,10 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
                 {
                     info->hasMyisam = true;
                 }
+                else if (strEndsWithZ(file.name, ".ISD") || strEndsWithZ(file.name, ".ISM"))
+                {
+                    info->hasIsam = true;                               // MySQL 3.21 → 4.0.2 — predates MyISAM
+                }
                 else if (strEndsWithZ(file.name, ".MAD") || strEndsWithZ(file.name, ".MAI"))
                 {
                     info->hasAria = true;
