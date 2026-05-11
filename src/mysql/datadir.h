@@ -64,6 +64,13 @@ typedef struct MysqlDataDirInfo
     // Security / format flags surfaced from the system tablespace
     bool encrypted;                                                     // FSP_FLAGS_MASK_ENCRYPTION bit set — needs keyring at restore
     MysqlPageChecksumAlgo pageChecksum;                                 // Detected by trial validation on a real page (None = unknown)
+
+    // File format — true if the system tablespace is in original Antelope format. ibdata1 on a server originally installed as
+    // MySQL 4.1 stays Antelope through every later upgrade unless the operator dump+restored. Backup works fine on Antelope
+    // (FSP layout + standard checksum are identical to Barracuda) — this flag is informational, mostly to populate the backup
+    // manifest so restore-side sanity checks can flag inappropriate target servers.
+    bool antelope;
+    unsigned int zipSsize;                                              // Compressed-page size shift, 0 if no compressed tables
 } MysqlDataDirInfo;
 
 // Inspect the datadir at dataPath. Always returns a non-NULL struct (zero-valued fields mean "not detected").

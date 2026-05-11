@@ -271,6 +271,37 @@ main(void)
         // Note: version stays at the safe lower bound 50500 because "Clone" has no version digits
 
         // ============================================================================================================================
+        // Scenario 6c: Antelope file format (the upgrade-from-4.1 case raised in code review)
+        //   ibdata1 on a server originally installed as MySQL 4.1 still has POST_ANTELOPE bit clear in FSP_SPACE_FLAGS even
+        //   after upgrades through 5.0/5.1/5.5/5.6. We must detect this so the backup manifest records it correctly and the
+        //   restore-side sanity check can warn if the target server can't read Antelope (none currently can't, but recording
+        //   the format is still the right thing to do).
+        // ============================================================================================================================
+
+        // Build ibdata1 with all FSP flag bits zero (= POST_ANTELOPE clear = Antelope, no compression, no encryption)
+        rmrf(root);
+        mkdirP(root);
+        writeMinimalIbdata1("/tmp/mybackrest-datadir-test/ibdata1");
+        touch("/tmp/mybackrest-datadir-test/ib_logfile0", "");
+
+        MysqlDataDirInfo *infoAntelope = mysqlDataDirInspect(storage, STRDEF("."));
+        expect("[Antelope] antelope=true (POST_ANTELOPE bit clear)", infoAntelope->antelope);
+        expect("[Antelope] zipSsize=0 (no compressed tables)", infoAntelope->zipSsize == 0);
+        expect("[Antelope] hasInnodb=true", infoAntelope->hasInnodb);
+
+        // Now flip POST_ANTELOPE bit on (= Barracuda or later)
+        unsigned char barracuda[16384];
+        memset(barracuda, 0, sizeof(barracuda));
+        barracuda[FSP_SPACE_FLAGS + 3] |= 0x01;                         // POST_ANTELOPE = bit 0 of FSP_SPACE_FLAGS
+        FILE *fp = fopen("/tmp/mybackrest-datadir-test/ibdata1", "wb");
+        if (fp == NULL) THROW(FileWriteError, "fopen");
+        fwrite(barracuda, 1, sizeof(barracuda), fp);
+        fclose(fp);
+
+        MysqlDataDirInfo *infoBarracuda = mysqlDataDirInspect(storage, STRDEF("."));
+        expect("[Barracuda] antelope=false (POST_ANTELOPE bit set)", !infoBarracuda->antelope);
+
+        // ============================================================================================================================
         // Scenario 7: empty / non-MySQL directory — must not throw, must return all-zero
         // ============================================================================================================================
         rmrf(root);

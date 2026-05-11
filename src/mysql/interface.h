@@ -125,6 +125,8 @@ typedef struct MysqlControl
     uint64_t lsnCheckpoint;                                             // Last checkpoint LSN at backup start
     bool encrypted;                                                     // FSP_FLAGS_MASK_ENCRYPTION bit set in FSP_SPACE_FLAGS
     bool hasSdi;                                                        // FSP_FLAGS_MASK_SDI bit (8.0+ Serialized Dictionary Info)
+    bool antelope;                                                      // POST_ANTELOPE bit clear → original Antelope file format
+    unsigned int zipSsize;                                              // ZIP_SSIZE field (0 = no compressed tables in this space)
 } MysqlControl;
 
 /***********************************************************************************************************************************
@@ -153,6 +155,16 @@ FN_EXTERN MysqlPageChecksumAlgo mysqlPageChecksumValidateAdaptive(
 // /home/user/mysql-server/storage/innobase/include/fsp0types.h:
 //   POST_ANTELOPE @ 0 (1)  ZIP_SSIZE @ 1..4 (4)  ATOMIC_BLOBS @ 5 (1)  PAGE_SSIZE @ 6..9 (4)
 //   DATA_DIR @ 10 (1)  SHARED @ 11 (1)  TEMPORARY @ 12 (1)  ENCRYPTION @ 13 (1)  SDI @ 14 (1)
+//
+// POST_ANTELOPE = 0 means the tablespace uses the original Antelope file format (the only format pre-MySQL 5.1; default until
+// 5.5.7). Antelope supports ROW_FORMAT=COMPACT/REDUNDANT only — no COMPRESSED, no DYNAMIC. An ibdata1 created on MySQL 4.1 stays
+// Antelope through every later upgrade (5.5 / 5.6 / 5.7) unless the operator explicitly dump+restored. Page-copy + standard
+// checksum work identically on both formats; only ROW_FORMAT=COMPRESSED pages (which Antelope can't produce) need different
+// per-page validation.
+#define FSP_FLAGS_POS_POST_ANTELOPE                                 0
+#define FSP_FLAGS_MASK_POST_ANTELOPE                                (1U << FSP_FLAGS_POS_POST_ANTELOPE)
+#define FSP_FLAGS_POS_ZIP_SSIZE                                     1
+#define FSP_FLAGS_MASK_ZIP_SSIZE                                    (0xFU << FSP_FLAGS_POS_ZIP_SSIZE)
 #define FSP_FLAGS_POS_ENCRYPTION                                    13
 #define FSP_FLAGS_MASK_ENCRYPTION                                   (1U << FSP_FLAGS_POS_ENCRYPTION)
 #define FSP_FLAGS_POS_SDI                                           14

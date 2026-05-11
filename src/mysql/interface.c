@@ -209,6 +209,13 @@ mysqlControlFromIbdata(const Storage *const storage, const String *const dataPat
         result.pageSize = mysqlPageSizeFromFlags(flags);
         result.encrypted = (flags & FSP_FLAGS_MASK_ENCRYPTION) != 0;
         result.hasSdi = (flags & FSP_FLAGS_MASK_SDI) != 0;
+        result.zipSsize = (flags & FSP_FLAGS_MASK_ZIP_SSIZE) >> FSP_FLAGS_POS_ZIP_SSIZE;
+
+        // POST_ANTELOPE bit: 0 = Antelope (original format, MySQL 4.1 → 5.5.6 default), 1 = Barracuda or later. Old upgraded
+        // installations carry Antelope ibdata1 forward forever — backup is fine because the FSP layout + standard checksum
+        // are identical, but the orchestrator may want to warn about per-table .ibd files using ROW_FORMAT=COMPRESSED (which
+        // requires Barracuda — Antelope can't produce them).
+        result.antelope = (flags & FSP_FLAGS_MASK_POST_ANTELOPE) == 0;
 
         // Definitive checksum-algo signal: MariaDB sets bit 4 to mark full_crc32 mode. For everyone else the algo isn't stored
         // on disk — leave pageChecksum at None and let the adaptive validator probe at copy time.

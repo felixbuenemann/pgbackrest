@@ -228,6 +228,8 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
                 info->pageSize = ctl.pageSize;
                 info->encrypted = ctl.encrypted;
                 info->pageChecksum = ctl.pageChecksum;                  // Either FullCrc32 (definitive) or None (caller probes)
+                info->antelope = ctl.antelope;
+                info->zipSsize = ctl.zipSsize;
 
                 // mysqlControlFromIbdata already infers 50700 vs 80000; honor it as a floor.
                 mysqlDataDirRaiseVersion(info, ctl.versionNum);
