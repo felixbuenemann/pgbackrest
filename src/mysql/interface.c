@@ -557,27 +557,13 @@ mysqlPageChecksumValidate(
 
     // The trailer's LSN low half should match FIL_PAGE_LSN's low half — that's a torn-page detector. If they don't match, the
     // page is torn and recovery (not us) will deal with it; we report invalid here so the upstream filter can re-read the page.
-    const uint32_t lsnLow = (uint32_t)((uint32_t)page[FIL_PAGE_LSN + 4] << 24) |
-                            (uint32_t)((uint32_t)page[FIL_PAGE_LSN + 5] << 16) |
-                            (uint32_t)((uint32_t)page[FIL_PAGE_LSN + 6] << 8)  |
-                            (uint32_t)page[FIL_PAGE_LSN + 7];
-
     const size_t trailerOffset = (size_t)pageSize - FIL_PAGE_TRAILER_SIZE;
-    const uint32_t trailerLsnLow = (uint32_t)((uint32_t)page[trailerOffset + 4] << 24) |
-                                   (uint32_t)((uint32_t)page[trailerOffset + 5] << 16) |
-                                   (uint32_t)((uint32_t)page[trailerOffset + 6] << 8)  |
-                                   (uint32_t)page[trailerOffset + 7];
 
-    if (lsnLow != trailerLsnLow)
+    if (mysqlReadU32Be(page + FIL_PAGE_LSN + 4) != mysqlReadU32Be(page + trailerOffset + 4))
         FUNCTION_TEST_RETURN(BOOL, false);
 
     // Also check the FIL_PAGE_OFFSET matches the caller's expectation
-    const uint32_t storedPageNo = (uint32_t)((uint32_t)page[FIL_PAGE_OFFSET + 0] << 24) |
-                                  (uint32_t)((uint32_t)page[FIL_PAGE_OFFSET + 1] << 16) |
-                                  (uint32_t)((uint32_t)page[FIL_PAGE_OFFSET + 2] << 8)  |
-                                  (uint32_t)page[FIL_PAGE_OFFSET + 3];
-
-    if (storedPageNo != pageNo)
+    if (mysqlReadU32Be(page + FIL_PAGE_OFFSET) != pageNo)
         FUNCTION_TEST_RETURN(BOOL, false);
 
     switch (algo)
@@ -588,12 +574,6 @@ mysqlPageChecksumValidate(
         case mysqlPageChecksumCrc32:
         case mysqlPageChecksumStrictCrc32:
         {
-            // Read stored checksum (big-endian)
-            const uint32_t stored = (uint32_t)((uint32_t)page[0] << 24) |
-                                    (uint32_t)((uint32_t)page[1] << 16) |
-                                    (uint32_t)((uint32_t)page[2] << 8)  |
-                                    (uint32_t)page[3];
-
             // Per buf_calc_page_crc32() in mysql-server/storage/innobase/buf/checksum.cc:
             //   c1 = crc32(page[FIL_PAGE_OFFSET..FIL_PAGE_FILE_FLUSH_LSN-1])      = bytes 4..25 (22 bytes)
             //   c2 = crc32(page[FIL_PAGE_DATA..pageSize-FIL_PAGE_END_LSN_OLD_CHKSUM-1]) = bytes 38..pageSize-9
@@ -606,19 +586,14 @@ mysqlPageChecksumValidate(
             const uint32_t c2 = (uint32_t)crc32(
                 0, page + FIL_PAGE_DATA, (uInt)(pageSize - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE));
 
-            FUNCTION_TEST_RETURN(BOOL, stored == (c1 ^ c2));
+            FUNCTION_TEST_RETURN(BOOL, mysqlReadU32Be(page) == (c1 ^ c2));
         }
 
         case mysqlPageChecksumFullCrc32:
         {
             // MariaDB 10.5+: single CRC32 over page[0..pageSize-5], compared to last 4 bytes (big-endian).
             const uint32_t expected = (uint32_t)crc32(0, page, (uInt)(pageSize - 4));
-            const uint32_t stored = (uint32_t)((uint32_t)page[pageSize - 4] << 24) |
-                                    (uint32_t)((uint32_t)page[pageSize - 3] << 16) |
-                                    (uint32_t)((uint32_t)page[pageSize - 2] << 8)  |
-                                    (uint32_t)page[pageSize - 1];
-
-            FUNCTION_TEST_RETURN(BOOL, stored == expected);
+            FUNCTION_TEST_RETURN(BOOL, mysqlReadU32Be(page + pageSize - 4) == expected);
         }
 
         case mysqlPageChecksumInnodb:
@@ -653,50 +628,32 @@ mysqlPageChecksumValidate(
             #define UT_HASH_RANDOM_MASK   ((uint32_t)1463735687u)
             #define UT_HASH_RANDOM_MASK2  ((uint32_t)1653893711u)
 
-            const uint32_t stored = (uint32_t)((uint32_t)page[0] << 24) |
-                                    (uint32_t)((uint32_t)page[1] << 16) |
-                                    (uint32_t)((uint32_t)page[2] << 8)  |
-                                    (uint32_t)page[3];
+            const uint32_t stored = mysqlReadU32Be(page);
 
             // BUF_NO_CHECKSUM_MAGIC marker (innodb_checksum_algorithm=none historic)
             if (stored == 0xDEADBEEFu)
                 FUNCTION_TEST_RETURN(BOOL, true);
 
-            // ut_fold_binary inlined for the new-checksum range (bytes 4..25 + bytes 38..pageSize-9)
+            // ut_fold_binary inlined for the new-checksum range (bytes 4..25 + bytes 38..pageSize-9), maintaining a single fold
+            // accumulator across both ranges.
+            #define UT_HASH_ROUND(fold, n2)                                                                                        \
+                ((uint32_t)((((uint64_t)((fold) ^ (n2) ^ UT_HASH_RANDOM_MASK2)) << 8) + (fold)) ^ UT_HASH_RANDOM_MASK) + (n2)
+
             uint32_t fold = 0;
 
-            // Range 1: bytes 4..25 (22 bytes — exactly 5 4-byte chunks + 2 leftover bytes)
-            for (size_t off = FIL_PAGE_OFFSET; off + 4 <= FIL_PAGE_FILE_FLUSH_LSN; off += 4)
+            for (size_t i = 0; i < 2; i++)
             {
-                const uint32_t n2 = ((uint32_t)page[off] << 24) | ((uint32_t)page[off + 1] << 16) |
-                                    ((uint32_t)page[off + 2] << 8) | (uint32_t)page[off + 3];
-                const uint32_t mix = (uint32_t)((((uint64_t)((fold ^ n2 ^ UT_HASH_RANDOM_MASK2)) << 8) + fold) & 0xFFFFFFFFu);
-                fold = (mix ^ UT_HASH_RANDOM_MASK) + n2;
-            }
-            for (size_t off = FIL_PAGE_OFFSET + ((FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET) & ~(size_t)3);
-                 off < FIL_PAGE_FILE_FLUSH_LSN; off++)
-            {
-                const uint32_t n2 = page[off];
-                const uint32_t mix = (uint32_t)((((uint64_t)((fold ^ n2 ^ UT_HASH_RANDOM_MASK2)) << 8) + fold) & 0xFFFFFFFFu);
-                fold = (mix ^ UT_HASH_RANDOM_MASK) + n2;
+                const size_t start = i == 0 ? FIL_PAGE_OFFSET : FIL_PAGE_DATA;
+                const size_t end   = i == 0 ? FIL_PAGE_FILE_FLUSH_LSN : (size_t)pageSize - FIL_PAGE_TRAILER_SIZE;
+
+                size_t off = start;
+                for (; off + 4 <= end; off += 4)
+                    fold = UT_HASH_ROUND(fold, mysqlReadU32Be(page + off));
+                for (; off < end; off++)
+                    fold = UT_HASH_ROUND(fold, (uint32_t)page[off]);
             }
 
-            // Range 2: bytes 38..pageSize-9
-            const size_t dataEnd = pageSize - FIL_PAGE_TRAILER_SIZE;
-            for (size_t off = FIL_PAGE_DATA; off + 4 <= dataEnd; off += 4)
-            {
-                const uint32_t n2 = ((uint32_t)page[off] << 24) | ((uint32_t)page[off + 1] << 16) |
-                                    ((uint32_t)page[off + 2] << 8) | (uint32_t)page[off + 3];
-                const uint32_t mix = (uint32_t)((((uint64_t)((fold ^ n2 ^ UT_HASH_RANDOM_MASK2)) << 8) + fold) & 0xFFFFFFFFu);
-                fold = (mix ^ UT_HASH_RANDOM_MASK) + n2;
-            }
-            for (size_t off = FIL_PAGE_DATA + ((dataEnd - FIL_PAGE_DATA) & ~(size_t)3); off < dataEnd; off++)
-            {
-                const uint32_t n2 = page[off];
-                const uint32_t mix = (uint32_t)((((uint64_t)((fold ^ n2 ^ UT_HASH_RANDOM_MASK2)) << 8) + fold) & 0xFFFFFFFFu);
-                fold = (mix ^ UT_HASH_RANDOM_MASK) + n2;
-            }
-
+            #undef UT_HASH_ROUND
             #undef UT_HASH_RANDOM_MASK
             #undef UT_HASH_RANDOM_MASK2
 
