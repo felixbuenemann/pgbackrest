@@ -27,4 +27,19 @@ FN_EXTERN void prepareWriteRecoveryFiles(const Storage *restoreStorage, const St
 // Spawn `<mysqldPath> --defaults-file=...` and wait for graceful exit; throws on non-zero exit
 FN_EXTERN void prepareInvokeMysqld(const String *mysqldPath, const String *restorePath);
 
+/***********************************************************************************************************************************
+Run the full restore-side compatibility check before letting mysqld touch the restored datadir.
+
+Steps:
+  1. Read mybackrest_backup_info from <backupPath> (mysqlBackupManifestRead).
+  2. Probe <mysqldPath> --version (mysqlBinaryProbe).
+  3. Run mysqlBinaryCheckCompatibility(probe, manifest.vendor, manifest.versionNum).
+  4. If incompatible: log the issue, throw OptionInvalidError. Operator can override by re-running with a different mysqld.
+  5. If only a warning (major-version skew or compatible-but-not-identical): log WARN, continue.
+
+Returns silently when the binary is safe to drive recovery. Throws on hard incompatibility.
+***********************************************************************************************************************************/
+FN_EXTERN void prepareVerifyCompatibility(
+    const Storage *backupStorage, const String *backupPath, const String *mysqldPath, bool allowMajorSkew);
+
 #endif

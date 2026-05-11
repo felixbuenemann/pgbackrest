@@ -403,3 +403,9 @@ executable(
     src_common, src_mybackrest, files('../test/src/standalone/manifestTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
+
+executable(
+    'standalone-compat-check-test',
+    src_common, src_mybackrest, files('../test/src/standalone/compatCheckTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)

@@ -19,6 +19,7 @@ SHUTDOWN. No GPLv2 InnoDB recovery code is linked into the MIT mybackrest binary
 #include "common/type/string.h"
 #include "common/type/stringList.h"
 #include "mysql/binary.h"
+#include "mysql/manifest.h"
 
 #define MYBACKREST_RECOVERY_CNF                                     "mybackrest_recovery.cnf"
 #define MYBACKREST_RECOVERY_SQL                                     "mybackrest_recovery.sql"
@@ -153,6 +154,83 @@ prepareInvokeMysqld(const String *const mysqldPath, const String *const restoreP
         }
 
         LOG_INFO("mysqld recovery completed; datadir is clean and ready for normal startup");
+    }
+    MEM_CONTEXT_TEMP_END();
+
+    FUNCTION_LOG_RETURN_VOID();
+}
+
+/**********************************************************************************************************************************/
+FN_EXTERN void
+prepareVerifyCompatibility(
+    const Storage *const backupStorage, const String *const backupPath, const String *const mysqldPath, const bool allowMajorSkew)
+{
+    FUNCTION_LOG_BEGIN(logLevelDebug);
+        FUNCTION_LOG_PARAM(STORAGE, backupStorage);
+        FUNCTION_LOG_PARAM(STRING, backupPath);
+        FUNCTION_LOG_PARAM(STRING, mysqldPath);
+        FUNCTION_LOG_PARAM(BOOL, allowMajorSkew);
+    FUNCTION_LOG_END();
+
+    ASSERT(backupStorage != NULL);
+    ASSERT(backupPath != NULL);
+    ASSERT(mysqldPath != NULL);
+
+    MEM_CONTEXT_TEMP_BEGIN()
+    {
+        // 1. Read the backup manifest. NULL means the backup didn't include one — older mybackrest output. Refuse rather than
+        //    guess: the operator should explicitly skip-check via a future flag if they want to drive recovery without metadata.
+        MysqlBackupManifestParsed *const manifest = mysqlBackupManifestRead(backupStorage, backupPath);
+
+        if (manifest == NULL)
+        {
+            THROW_FMT(
+                FileMissingError,
+                "%s/mybackrest_backup_info missing — cannot verify the recovery binary is compatible with this backup",
+                strZ(backupPath));
+        }
+
+        LOG_INFO_FMT(
+            "manifest: format=%u, vendor=%u, version=%u, taken=%s",
+            manifest->format,
+            (unsigned int)manifest->info->vendor,
+            manifest->info->versionNum,
+            manifest->backupTime != NULL ? strZ(manifest->backupTime) : "(unknown)");
+
+        // 2. Probe the operator's mysqld binary
+        MysqlBinaryInfo *const probe = mysqlBinaryProbe(mysqldPath);
+
+        // 3. Run the compatibility check
+        String *const issue = mysqlBinaryCheckCompatibility(probe, manifest->info->vendor, manifest->info->versionNum);
+
+        if (issue == NULL)
+        {
+            LOG_INFO_FMT(
+                "compatibility check OK: backup vendor=%u version=%u ↔ binary vendor=%u version=%u",
+                (unsigned int)manifest->info->vendor, manifest->info->versionNum,
+                (unsigned int)probe->vendor, probe->versionNum);
+        }
+        else
+        {
+            // The check returns a non-NULL string for both hard incompatibility AND warnings (major-version skew). Distinguish
+            // by inspecting the message — anything containing "INCOMPATIBLE" or "unsupported" is hard. Major-version skew is
+            // tolerated when allowMajorSkew=true.
+            if (strstr(strZ(issue), "unsupported") != NULL || strstr(strZ(issue), "mismatch:") != NULL)
+            {
+                if (allowMajorSkew && strstr(strZ(issue), "major-version mismatch") != NULL)
+                {
+                    LOG_WARN_FMT("compatibility check WARN (allowed by --allow-major-skew): %s", strZ(issue));
+                }
+                else
+                {
+                    THROW_FMT(OptionInvalidError, "compatibility check FAILED: %s", strZ(issue));
+                }
+            }
+            else
+            {
+                LOG_WARN_FMT("compatibility check WARN: %s", strZ(issue));
+            }
+        }
     }
     MEM_CONTEXT_TEMP_END();
 
