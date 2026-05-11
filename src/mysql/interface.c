@@ -328,6 +328,69 @@ mysqlRedoFirstFile(const Storage *const storage, const String *const dataPath)
     return result;
 }
 
+/***********************************************************************************************************************************
+Parse the LOG_HEADER_CREATOR string. Returns the detected vendor and version (writes 0 for unparseable). Handles the four prefix
+forms ("MariaDB X.Y.Z", "MySQL Clone …", "MySQL X.Y.Z[-N]", "MEB …") plus the substring fallback for Percona-XtraBackup output.
+
+The Percona "-N" suffix after the patch number is the distinguishing signal vs upstream MySQL — per percona-server
+storage/innobase/include/univ.i, Percona's INNODB_VERSION_STR appends PERCONA_INNODB_VERSION as "MAJOR.MINOR.BUGFIX-N".
+***********************************************************************************************************************************/
+static void
+mysqlRedoCreatorParseString(const char *const creator, MysqlVendor *const vendorOut, unsigned int *const versionOut)
+{
+    // Prefix-based vendor signal
+    if (strncmp(creator, "MariaDB ", 8) == 0)
+    {
+        *vendorOut = mysqlVendorMariadb;
+    }
+    else if (strncmp(creator, "MySQL Clone", 11) == 0)
+    {
+        // CLONE plugin output — vendor would have matched the source server; treat as MySQL (caller can refine)
+        *vendorOut = mysqlVendorMysql;
+    }
+    else if (strncmp(creator, "MySQL ", 6) == 0)
+    {
+        *vendorOut = mysqlVendorMysql;                                          // default — promoted to Percona below if "-N" suffix
+    }
+    else if (strncmp(creator, "MEB ", 4) == 0)
+    {
+        // MySQL Enterprise Backup wrote this — we're inspecting a backup directory, not a live datadir
+        *vendorOut = mysqlVendorUnknown;
+    }
+    else if (strstr(creator, "Percona") != NULL || strstr(creator, "Xtra") != NULL)
+    {
+        // xtrabackup writes "Percona-XtraBackup X.Y.Z" — we're looking at a backup dir, not a live datadir
+        *vendorOut = mysqlVendorPercona;
+    }
+
+    // Scan past the prefix word to the first digit, then read "X.Y.Z" / "X.Y"
+    const char *digits = creator;
+    while (*digits != '\0' && (*digits < '0' || *digits > '9'))
+        digits++;
+
+    if (*digits == '\0')
+        return;
+
+    unsigned int major = 0, minor = 0, patch = 0;
+    int consumed = 0;
+
+    if (sscanf(digits, "%u.%u.%u%n", &major, &minor, &patch, &consumed) >= 3)
+    {
+        *versionOut = major * 10000 + minor * 100 + patch;
+
+        // Percona "-N" suffix → promote generic MySQL detection to Percona
+        if (consumed > 0 && digits[consumed] == '-' && digits[consumed + 1] >= '0' && digits[consumed + 1] <= '9'
+            && *vendorOut == mysqlVendorMysql)
+        {
+            *vendorOut = mysqlVendorPercona;
+        }
+    }
+    else if (sscanf(digits, "%u.%u", &major, &minor) >= 2)
+    {
+        *versionOut = major * 10000 + minor * 100;
+    }
+}
+
 /**********************************************************************************************************************************/
 FN_EXTERN MysqlRedoCreator
 mysqlRedoCreatorRead(const Storage *const storage, const String *const dataPath)
@@ -376,63 +439,7 @@ mysqlRedoCreatorRead(const Storage *const storage, const String *const dataPath)
                 }
                 creator[len] = '\0';
 
-                // Vendor detection by prefix + suffix. Per the cloned percona-server source
-                // (storage/innobase/include/univ.i): Percona's INNODB_VERSION_STR is
-                //   IB_TO_STR(MAJOR) "." IB_TO_STR(MINOR) "." IB_TO_STR(BUGFIX) "-" IB_TO_STR(PERCONA_INNODB_VERSION)
-                // so a Percona 8.0.36 redo header says "MySQL 8.0.36-8" (8 is the Percona-specific InnoDB version int),
-                // while upstream MySQL 8.0.36 says plain "MySQL 8.0.36". The "-N" suffix after the version is the
-                // distinguishing signal.
-                if (strncmp(creator, "MariaDB ", 8) == 0)
-                {
-                    result.vendor = mysqlVendorMariadb;
-                }
-                else if (strncmp(creator, "MySQL Clone", 11) == 0)
-                {
-                    // CLONE plugin output — vendor would have matched the source server; treat as MySQL (caller can refine)
-                    result.vendor = mysqlVendorMysql;
-                }
-                else if (strncmp(creator, "MySQL ", 6) == 0)
-                {
-                    result.vendor = mysqlVendorMysql;                   // default — refined below if Percona suffix found
-                }
-                else if (strncmp(creator, "MEB ", 4) == 0)
-                {
-                    // MySQL Enterprise Backup wrote this — we're inspecting a backup directory, not a live datadir
-                    result.vendor = mysqlVendorUnknown;
-                }
-                else if (strstr(creator, "Percona") != NULL || strstr(creator, "Xtra") != NULL)
-                {
-                    // xtrabackup writes "Percona-XtraBackup X.Y.Z" — we're looking at a backup dir, not a live datadir
-                    result.vendor = mysqlVendorPercona;
-                }
-
-                // Version: scan past the prefix word for "X.Y.Z" (and check for the Percona "-N" suffix)
-                const char *digits = creator;
-                while (*digits != '\0' && (*digits < '0' || *digits > '9'))
-                    digits++;
-
-                if (*digits != '\0')
-                {
-                    unsigned int major = 0, minor = 0, patch = 0;
-                    int consumed = 0;
-                    if (sscanf(digits, "%u.%u.%u%n", &major, &minor, &patch, &consumed) >= 3)
-                    {
-                        result.versionNum = major * 10000 + minor * 100 + patch;
-
-                        // After the version, Percona appends "-N" where N is PERCONA_INNODB_VERSION (small integer).
-                        // Upstream MySQL has nothing after the patch number, so the presence of "-<digit>" promotes the
-                        // detected vendor from generic MySQL to Percona.
-                        if (consumed > 0 && digits[consumed] == '-' && digits[consumed + 1] >= '0' && digits[consumed + 1] <= '9'
-                            && result.vendor == mysqlVendorMysql)
-                        {
-                            result.vendor = mysqlVendorPercona;
-                        }
-                    }
-                    else if (sscanf(digits, "%u.%u", &major, &minor) >= 2)
-                    {
-                        result.versionNum = major * 10000 + minor * 100;
-                    }
-                }
+                mysqlRedoCreatorParseString(creator, &result.vendor, &result.versionNum);
 
                 MEM_CONTEXT_PRIOR_BEGIN()
                 {
