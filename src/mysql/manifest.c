@@ -10,6 +10,8 @@ just emits empty/missing fields rather than failing to render.
 #include <time.h>
 
 #include "common/debug.h"
+#include "common/io/bufferRead.h"
+#include "common/ini.h"
 #include "common/log.h"
 #include "common/type/buffer.h"
 #include "common/type/convert.h"
@@ -291,39 +293,19 @@ mysqlBackupManifestParse(const String *const text)
 
     MEM_CONTEXT_TEMP_BEGIN()
     {
-        // Pass 1: walk lines, build a "section\nkey" → value KeyValue. Section header is "[name]"; key=value lines split on
-        // first '='. Comments (lines beginning with '#') and blank lines are skipped. Whitespace around key and value is
-        // trimmed. The parser is intentionally tolerant — a malformed line just gets logged at DETAIL and skipped.
+        // Drain the manifest through common/ini.c — handles bracket-delimited sections, key=value with whitespace tolerance, and
+        // comment lines. Compose into the same "section\nkey" → value KeyValue layout that lookupKv expects.
         KeyValue *const kv = kvNew();
-        StringList *const lines = strLstNewSplit(text, STRDEF("\n"));
-        String *currentSection = NULL;
 
-        for (unsigned int i = 0; i < strLstSize(lines); i++)
+        Buffer *const textBuf = bufNewC(strZ(text), strSize(text));
+        Ini *const ini = iniNewP(ioBufferReadNew(textBuf));
+        const IniValue *iv;
+
+        while ((iv = iniValueNext(ini)) != NULL)
         {
-            const String *const line = strTrim(strDup(strLstGet(lines, i)));
-
-            if (strSize(line) == 0 || strZ(line)[0] == '#')
-                continue;
-
-            if (strBeginsWithZ(line, "[") && strEndsWithZ(line, "]"))
-            {
-                strFree(currentSection);
-                currentSection = strSubN(line, 1, strSize(line) - 2);
-                continue;
-            }
-
-            if (currentSection == NULL)
-                continue;                                               // Stray line before the first section — ignore
-
-            const int eqIdx = (int)strChr(line, '=');
-            if (eqIdx <= 0)
-                continue;
-
-            String *const key = strTrim(strSubN(line, 0, (size_t)eqIdx));
-            String *const value = strTrim(strSubN(line, (size_t)eqIdx + 1, strSize(line) - (size_t)eqIdx - 1));
-
-            String *const composite = strNewFmt("%s\n%s", strZ(currentSection), strZ(key));
-            kvPut(kv, VARSTR(composite), VARSTR(value));
+            String *const composite = strNewFmt("%s\n%s", strZ(iv->section), strZ(iv->key));
+            kvPut(kv, VARSTR(composite), VARSTR(iv->value));
+            strFree(composite);
         }
 
         // Pass 2: extract typed fields
