@@ -91,8 +91,8 @@ mysqlBackupManifestRender(const MysqlDataDirInfo *const info, const MysqlBackupB
         gmtime_r(&now, &utc);
         strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &utc);
 
-        // strNewFmt allocates a fixed-size string; switch to strNew + strCatFmt so the optional [galera] / [binlog] sections
-        // can be appended.
+        // Optional [galera] / [binlog] sections are appended below — build incrementally with strCatFmt rather than one fixed
+        // strNewFmt.
         String *const out = strNew();
         strCatFmt(
             out,
