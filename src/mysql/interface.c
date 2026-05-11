@@ -17,7 +17,6 @@ provide via the test harness in test/data/mysql/.
 #include "common/log.h"
 #include "common/type/buffer.h"
 #include "common/type/string.h"
-#include "common/type/stringList.h"
 #include "mysql/interface.h"
 #include "storage/storage.h"
 
