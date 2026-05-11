@@ -258,6 +258,7 @@ src_mybackrest = [
     'mysql/manifest.c',
     'mysql/pageValidate.c',
     'mysql/sanity.c',
+    'mysql/verify.c',
     'postgres/client.c',
     'postgres/interface.c',
     'postgres/interface/crc32.c',
@@ -428,5 +429,11 @@ executable(
 executable(
     'standalone-page-validate-test',
     src_common, src_mybackrest, files('../test/src/standalone/pageValidateTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+executable(
+    'standalone-verify-test',
+    src_common, src_mybackrest, files('../test/src/standalone/verifyTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
