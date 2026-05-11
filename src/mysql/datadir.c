@@ -113,6 +113,13 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
                 {
                     info->hasTokudb = true;
                 }
+                else if (strEqZ(entry.name, "grastate.dat") || strEqZ(entry.name, "gvwstate.dat"))
+                {
+                    info->hasGalera = true;
+                    // Default vendor when only the Galera signal is seen — both MariaDB Galera Cluster and Percona XtraDB
+                    // Cluster write these files; we can't disambiguate from the file alone. Don't override if a more
+                    // specific signal already set vendor.
+                }
             }
             else if (entry.type == storageTypePath)
             {
@@ -300,6 +307,54 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
             CATCH_ANY()
             {
                 LOG_DETAIL_FMT("redo log creator inspection failed: %s", errorMessage());
+            }
+            TRY_END();
+        }
+
+        // Galera state file: if present, parse uuid + seqno from the last-known-good cluster state. Format is plain INI:
+        //   # GALERA saved state
+        //   version: 2.1
+        //   uuid:    abc123-...
+        //   seqno:   12345
+        //   safe_to_bootstrap: 0
+        info->galeraSeqno = -1;
+        if (info->hasGalera)
+        {
+            TRY_BEGIN()
+            {
+                const String *const grastatePath = strNewFmt("%s/grastate.dat", strZ(dataPath));
+                Buffer *const content = storageGetP(storageNewReadP(storage, grastatePath, .ignoreMissing = true));
+
+                if (content != NULL)
+                {
+                    const String *const text = strNewBuf(content);
+                    StringList *const lines = strLstNewSplit(text, STRDEF("\n"));
+
+                    for (unsigned int i = 0; i < strLstSize(lines); i++)
+                    {
+                        const String *const line = strTrim(strDup(strLstGet(lines, i)));
+
+                        if (strBeginsWithZ(line, "uuid:"))
+                        {
+                            const String *const uuid = strTrim(strSubN(line, 5, strSize(line) - 5));
+
+                            MEM_CONTEXT_PRIOR_BEGIN()
+                            {
+                                info->galeraStateUuid = strDup(uuid);
+                            }
+                            MEM_CONTEXT_PRIOR_END();
+                        }
+                        else if (strBeginsWithZ(line, "seqno:"))
+                        {
+                            const String *const seqStr = strTrim(strSubN(line, 6, strSize(line) - 6));
+                            info->galeraSeqno = strtoll(strZ(seqStr), NULL, 10);
+                        }
+                    }
+                }
+            }
+            CATCH_ANY()
+            {
+                LOG_DETAIL_FMT("grastate.dat parse failed: %s", errorMessage());
             }
             TRY_END();
         }

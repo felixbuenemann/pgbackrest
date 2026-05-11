@@ -61,6 +61,14 @@ typedef struct MysqlDataDirInfo
     bool hasMyrocks;                                                    // .rocksdb/ or #rocksdb/ subdir
     bool hasTokudb;                                                     // any *.tokudb or tokudb.environment
 
+    // Cluster / replication state. Galera (MariaDB Galera Cluster, Percona XtraDB Cluster) leaves identifying state files
+    // in the datadir top level: grastate.dat (cluster state at last shutdown) and gvwstate.dat (Galera View state). Their
+    // presence means the datadir was part of a cluster; backup metadata should record this so restore can decide whether
+    // to bring the node back as part of the cluster or as a standalone (which requires bootstrapping a new cluster).
+    bool hasGalera;                                                     // grastate.dat OR gvwstate.dat present
+    String *galeraStateUuid;                                            // From grastate.dat "uuid:" line (NULL if absent)
+    int64_t galeraSeqno;                                                // From grastate.dat "seqno:" line (-1 if absent)
+
     // Security / format flags surfaced from the system tablespace
     bool encrypted;                                                     // FSP_FLAGS_MASK_ENCRYPTION bit set — needs keyring at restore
     MysqlPageChecksumAlgo pageChecksum;                                 // Detected by trial validation on a real page (None = unknown)

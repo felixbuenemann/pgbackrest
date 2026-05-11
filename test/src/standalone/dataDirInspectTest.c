@@ -346,6 +346,34 @@ main(void)
         expect("[probe] inspector detected CRC32 algorithm from page 0", infoProbe->pageChecksum == mysqlPageChecksumCrc32);
 
         // ============================================================================================================================
+        // Scenario 6e: Galera cluster state files — grastate.dat / gvwstate.dat present
+        // ============================================================================================================================
+        rmrf(root);
+        mkdirP(root);
+        writeMinimalIbdata1("/tmp/mybackrest-datadir-test/ibdata1");
+
+        // Synthesize a realistic grastate.dat
+        FILE *fpGra = fopen("/tmp/mybackrest-datadir-test/grastate.dat", "w");
+        if (fpGra == NULL) THROW(FileWriteError, "fopen");
+        fprintf(fpGra,
+            "# GALERA saved state\n"
+            "version: 2.1\n"
+            "uuid:    aaaa1111-bbbb-2222-cccc-333333333333\n"
+            "seqno:   987654321\n"
+            "safe_to_bootstrap: 0\n");
+        fclose(fpGra);
+
+        touch("/tmp/mybackrest-datadir-test/gvwstate.dat", "view state placeholder");
+
+        MysqlDataDirInfo *infoGalera = mysqlDataDirInspect(storage, STRDEF("."));
+        expect("[Galera] hasGalera=true (grastate.dat present)", infoGalera->hasGalera);
+        expect(
+            "[Galera] cluster UUID extracted",
+            infoGalera->galeraStateUuid != NULL &&
+                strEqZ(infoGalera->galeraStateUuid, "aaaa1111-bbbb-2222-cccc-333333333333"));
+        expect("[Galera] seqno extracted", infoGalera->galeraSeqno == 987654321);
+
+        // ============================================================================================================================
         // Scenario 7: empty / non-MySQL directory — must not throw, must return all-zero
         // ============================================================================================================================
         rmrf(root);
