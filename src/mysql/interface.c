@@ -12,6 +12,8 @@ provide via the test harness in test/data/mysql/.
 #include <zlib.h>
 
 #include "common/debug.h"
+#include "common/ini.h"
+#include "common/io/bufferRead.h"
 #include "common/log.h"
 #include "common/type/buffer.h"
 #include "common/type/string.h"
@@ -38,50 +40,27 @@ mysqlAutoCnfReadUuid(const Storage *const storage, const String *const dataPath)
         const String *const fullPath = strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_AUTOCNF);
         Buffer *const content = storageGetP(storageNewReadP(storage, fullPath, .ignoreMissing = true));
 
-        // auto.cnf is created on first server start; absence is a valid pre-bootstrap state
+        // auto.cnf is created on first server start; absence is a valid pre-bootstrap state. Format:
+        //   [auto]
+        //   server-uuid=8c0fd6f0-bf8f-11ee-9821-0242ac120002
         if (content != NULL)
         {
-            // Format:
-            //   [auto]
-            //   server-uuid=8c0fd6f0-bf8f-11ee-9821-0242ac120002
-            // We split on \n and look for the prefix; the file is small (<200 bytes) so allocating a StringList is cheap.
-            const String *const text = strNewBuf(content);
-            StringList *const lines = strLstNewSplit(text, STRDEF("\n"));
+            // iniNewP(.store=true) drains the IoRead during construction; no separate iniValid call needed.
+            Ini *const ini = iniNewP(ioBufferReadNew(content), .store = true);
+            const String *const value = iniGet(ini, STRDEF("auto"), STRDEF("server-uuid"));
 
-            for (unsigned int lineIdx = 0; lineIdx < strLstSize(lines); lineIdx++)
+            if (value == NULL || strSize(value) != 36)
             {
-                const String *const line = strTrim(strDup(strLstGet(lines, lineIdx)));
-
-                if (strBeginsWithZ(line, "server-uuid"))
-                {
-                    // Take everything after the first '=' and trim
-                    const int eqIdx = (int)strChr(line, '=');
-
-                    if (eqIdx >= 0)
-                    {
-                        const String *const value = strTrim(strSubN(line, (size_t)eqIdx + 1, strSize(line) - (size_t)eqIdx - 1));
-
-                        // MySQL UUID is exactly 36 chars (8-4-4-4-12 with dashes). Validate length only — full regex is not
-                        // worth the dependency here.
-                        if (strSize(value) != 36)
-                        {
-                            THROW_FMT(
-                                FormatError, "auto.cnf has invalid server-uuid length %zu in '%s'", strSize(value), strZ(fullPath));
-                        }
-
-                        MEM_CONTEXT_PRIOR_BEGIN()
-                        {
-                            result = strDup(value);
-                        }
-                        MEM_CONTEXT_PRIOR_END();
-
-                        break;
-                    }
-                }
+                THROW_FMT(
+                    FormatError, "auto.cnf at '%s' has invalid or missing server-uuid (length %zu, expected 36)",
+                    strZ(fullPath), value != NULL ? strSize(value) : 0);
             }
 
-            if (result == NULL)
-                THROW_FMT(FormatError, "auto.cnf at '%s' missing server-uuid line", strZ(fullPath));
+            MEM_CONTEXT_PRIOR_BEGIN()
+            {
+                result = strDup(value);
+            }
+            MEM_CONTEXT_PRIOR_END();
         }
     }
     MEM_CONTEXT_TEMP_END();
