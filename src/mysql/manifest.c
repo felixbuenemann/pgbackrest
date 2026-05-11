@@ -124,7 +124,12 @@ mysqlBackupManifestRender(const MysqlDataDirInfo *const info, const MysqlBackupB
             "isam = %s\n"
             "aria = %s\n"
             "myrocks = %s\n"
-            "tokudb = %s\n",
+            "tokudb = %s\n"
+            "csv = %s\n"
+            "archive = %s\n"
+            "merge = %s\n"
+            "connect = %s\n"
+            "mroonga = %s\n",
             REPOSITORY_FORMAT,
             PROJECT_VERSION,
             ts,
@@ -145,7 +150,12 @@ mysqlBackupManifestRender(const MysqlDataDirInfo *const info, const MysqlBackupB
             info->hasIsam ? "true" : "false",
             info->hasAria ? "true" : "false",
             info->hasMyrocks ? "true" : "false",
-            info->hasTokudb ? "true" : "false");
+            info->hasTokudb ? "true" : "false",
+            info->hasCsv ? "true" : "false",
+            info->hasArchive ? "true" : "false",
+            info->hasMerge ? "true" : "false",
+            info->hasConnect ? "true" : "false",
+            info->hasMroonga ? "true" : "false");
 
         if (info->hasGalera)
         {
@@ -370,6 +380,11 @@ mysqlBackupManifestParse(const String *const text)
             result->info->hasAria = parseBool(lookupKv(kv, "engines", "aria"));
             result->info->hasMyrocks = parseBool(lookupKv(kv, "engines", "myrocks"));
             result->info->hasTokudb = parseBool(lookupKv(kv, "engines", "tokudb"));
+            result->info->hasCsv = parseBool(lookupKv(kv, "engines", "csv"));
+            result->info->hasArchive = parseBool(lookupKv(kv, "engines", "archive"));
+            result->info->hasMerge = parseBool(lookupKv(kv, "engines", "merge"));
+            result->info->hasConnect = parseBool(lookupKv(kv, "engines", "connect"));
+            result->info->hasMroonga = parseBool(lookupKv(kv, "engines", "mroonga"));
 
             result->info->hasGalera = hasGaleraSection;
             result->info->galeraStateUuid = (galeraUuidStr != NULL && strSize(galeraUuidStr) > 0) ? strDup(galeraUuidStr) : NULL;

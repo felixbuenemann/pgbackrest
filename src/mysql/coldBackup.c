@@ -13,6 +13,7 @@ Cold-Mode (Offline) Backup Orchestrator
 #include "mysql/engine/engine.h"
 #include "mysql/interface.h"
 #include "mysql/manifest.h"
+#include "mysql/miscFiles.h"
 #include "storage/storage.h"
 
 /***********************************************************************************************************************************
@@ -32,14 +33,24 @@ static bool hasIsam(const MysqlDataDirInfo *const i)   { return i->hasIsam; }
 static bool hasAria(const MysqlDataDirInfo *const i)   { return i->hasAria; }
 static bool hasMyrocks(const MysqlDataDirInfo *const i){ return i->hasMyrocks; }
 static bool hasTokudb(const MysqlDataDirInfo *const i) { return i->hasTokudb; }
+static bool hasCsv(const MysqlDataDirInfo *const i)    { return i->hasCsv; }
+static bool hasArchive(const MysqlDataDirInfo *const i){ return i->hasArchive; }
+static bool hasMerge(const MysqlDataDirInfo *const i)  { return i->hasMerge; }
+static bool hasConnect(const MysqlDataDirInfo *const i){ return i->hasConnect; }
+static bool hasMroonga(const MysqlDataDirInfo *const i){ return i->hasMroonga; }
 
 static const ColdBackupEngineRow coldBackupEngines[] = {
-    {hasInnodb,  "innodb",  "InnoDB"},
-    {hasMyisam,  "myisam",  "MyISAM"},
-    {hasIsam,    "isam",    "ISAM"},
-    {hasAria,    "aria",    "Aria"},
-    {hasMyrocks, "rocksdb", "RocksDB/MyRocks"},
-    {hasTokudb,  "tokudb",  "TokuDB"},
+    {hasInnodb,  "innodb",     "InnoDB"},
+    {hasMyisam,  "myisam",     "MyISAM"},
+    {hasIsam,    "isam",       "ISAM"},
+    {hasAria,    "aria",       "Aria"},
+    {hasMyrocks, "rocksdb",    "RocksDB/MyRocks"},
+    {hasTokudb,  "tokudb",     "TokuDB"},
+    {hasCsv,     "csv",        "CSV"},
+    {hasArchive, "archive",    "Archive"},
+    {hasMerge,   "mrg_myisam", "MERGE"},
+    {hasConnect, "connect",    "Connect"},
+    {hasMroonga, "mroonga",    "Mroonga"},
 };
 
 /**********************************************************************************************************************************/
@@ -144,6 +155,11 @@ mysqlColdBackup(
             storageCopyP(storageNewReadP(srcStorage, srcAutoCnf), storageNewWriteP(dstStorage, dstAutoCnf));
             result->autoCnfCopied = true;
         }
+
+        // Step 4.5: miscellaneous files (.sdi, .CSV, .CSM, .opt, etc.) + empty schema directories. Without this, mysqld won't
+        // start against the restored datadir because Data Dictionary initialization expects mysql/ and performance_schema/
+        // to be on disk.
+        mysqlMiscFilesCopy(srcStorage, dataPath, dstStorage, backupPath);
 
         // Step 5: render and write the manifest. No binlog block in cold mode — that's an online concept.
         mysqlBackupManifestWrite(dstStorage, backupPath, info, /*binlog*/ NULL);

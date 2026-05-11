@@ -237,6 +237,29 @@ dataDirScanSchemas(
                 info->hasAria = true;
                 info->vendor = mysqlVendorMariadb;
             }
+            else if (strEndsWithZ(file.name, ".CSV") || strEndsWithZ(file.name, ".CSM"))
+            {
+                info->hasCsv = true;                                                // CSV engine — mysql.general_log/slow_log + user tables
+            }
+            else if (strEndsWithZ(file.name, ".ARZ"))
+            {
+                info->hasArchive = true;                                            // ARCHIVE engine — append-only audit tables
+            }
+            else if (strEndsWithZ(file.name, ".MRG"))
+            {
+                info->hasMerge = true;                                              // MERGE engine — references MyISAM children
+            }
+            else if (strEndsWithZ(file.name, ".dnx"))
+            {
+                info->hasConnect = true;                                            // MariaDB CONNECT engine
+                info->vendor = mysqlVendorMariadb;
+            }
+            else if (strstr(strZ(file.name), ".mrn") != NULL)
+            {
+                // Mroonga uses .mrn, .mrn.NNNNNNNN, .mrn.c, .mrn.l, etc. — any file whose name contains ".mrn" qualifies.
+                info->hasMroonga = true;
+                info->vendor = mysqlVendorMariadb;
+            }
             else if (strEqZ(schema, "mysql") &&
                      (strBeginsWithZ(file.name, "gtid_executed.") || strBeginsWithZ(file.name, "gtid_slave_pos.")))
             {
@@ -438,11 +461,13 @@ mysqlDataDirInfoToLog(const MysqlDataDirInfo *const this, StringStatic *const de
     strStcFmt(
         debugLog,
         "{vendor: %u, versionNum: %u, exact: %s, pageSize: %u, redoLayout: %u,"
-        " engines:[innodb=%s,myisam=%s,isam=%s,aria=%s,myrocks=%s,toku=%s]}",
+        " engines:[innodb=%s,myisam=%s,isam=%s,aria=%s,myrocks=%s,toku=%s,csv=%s,archive=%s,merge=%s,connect=%s,mroonga=%s]}",
         (unsigned int)this->vendor, this->versionNum, this->versionExact ? "true" : "false",
         (unsigned int)this->pageSize, (unsigned int)this->redoLayout,
         this->hasInnodb ? "y" : "n", this->hasMyisam ? "y" : "n", this->hasIsam ? "y" : "n",
-        this->hasAria ? "y" : "n", this->hasMyrocks ? "y" : "n", this->hasTokudb ? "y" : "n");
+        this->hasAria ? "y" : "n", this->hasMyrocks ? "y" : "n", this->hasTokudb ? "y" : "n",
+        this->hasCsv ? "y" : "n", this->hasArchive ? "y" : "n", this->hasMerge ? "y" : "n",
+        this->hasConnect ? "y" : "n", this->hasMroonga ? "y" : "n");
 }
 
 /***********************************************************************************************************************************
@@ -549,6 +574,11 @@ mysqlDataDirSummarize(const MysqlDataDirInfo *const info)
             {info->hasAria,    "aria"},
             {info->hasMyrocks, "myrocks"},
             {info->hasTokudb,  "tokudb"},
+            {info->hasCsv,     "csv"},
+            {info->hasArchive, "archive"},
+            {info->hasMerge,   "merge"},
+            {info->hasConnect, "connect"},
+            {info->hasMroonga, "mroonga"},
         };
 
         bool first = true;

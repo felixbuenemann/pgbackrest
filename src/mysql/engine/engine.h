@@ -43,6 +43,9 @@ typedef enum
     mysqlEngineFederated,                                               // No local state
     mysqlEngineArchive,                                                 // .ARZ flat copy
     mysqlEngineBlackhole,                                               // No state
+    mysqlEngineMerge,                                                   // MRG_MyISAM — .MRG references child MyISAM tables
+    mysqlEngineConnect,                                                 // MariaDB CONNECT — projects external data sources
+    mysqlEngineMroonga,                                                 // MariaDB Mroonga — Groonga-backed fulltext
 } MysqlEngineKind;
 
 /***********************************************************************************************************************************

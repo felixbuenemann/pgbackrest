@@ -246,10 +246,15 @@ src_mybackrest = [
     'mysql/coldBackup.c',
     'mysql/coldRestore.c',
     'mysql/datadir.c',
+    'mysql/engine/archive.c',
     'mysql/engine/aria.c',
+    'mysql/engine/connect.c',
+    'mysql/engine/csv.c',
     'mysql/engine/engine.c',
     'mysql/engine/innodb.c',
     'mysql/engine/isam.c',
+    'mysql/engine/merge.c',
+    'mysql/engine/mroonga.c',
     'mysql/engine/myisam.c',
     'mysql/engine/rocksdb.c',
     'mysql/engine/toku.c',
@@ -257,6 +262,7 @@ src_mybackrest = [
     'mysql/interface.c',
     'mysql/lock.c',
     'mysql/manifest.c',
+    'mysql/miscFiles.c',
     'mysql/pageValidate.c',
     'mysql/sanity.c',
     'mysql/verify.c',
@@ -457,5 +463,13 @@ executable(
 executable(
     'standalone-e2e-test',
     src_common, src_mybackrest, files('../test/src/standalone/e2eTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+# End-to-end restore test — drives mysqlColdRestore against the backup the e2e test produced. The harness script runs this
+# AFTER stopping the original mysqld; then it starts a fresh mysqld against the restored datadir to verify the data is intact.
+executable(
+    'standalone-e2e-restore-test',
+    src_common, src_mybackrest, files('../test/src/standalone/e2eRestoreTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )

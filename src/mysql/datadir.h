@@ -63,6 +63,11 @@ typedef struct MysqlDataDirInfo
     bool hasAria;                                                       // any *.MAD or aria_log_control
     bool hasMyrocks;                                                    // .rocksdb/ or #rocksdb/ subdir
     bool hasTokudb;                                                     // any *.tokudb or tokudb.environment
+    bool hasCsv;                                                        // any *.CSV — mysql.general_log + slow_log, plus user tables
+    bool hasArchive;                                                    // any *.ARZ — ARCHIVE engine, append-only audit tables
+    bool hasMerge;                                                      // any *.MRG — MERGE engine, virtual union over MyISAM tables
+    bool hasConnect;                                                    // any *.dnx — MariaDB CONNECT engine local-file projection
+    bool hasMroonga;                                                    // any *.mrn / *.mrn.NNN — MariaDB Mroonga fulltext
 
     // Cluster / replication state. Galera (MariaDB Galera Cluster, Percona XtraDB Cluster) leaves identifying state files
     // in the datadir top level: grastate.dat (cluster state at last shutdown) and gvwstate.dat (Galera View state). Their

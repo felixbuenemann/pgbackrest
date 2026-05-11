@@ -20,10 +20,15 @@ fail loudly with a "no handler for engine X" message.
 #include "common/log.h"
 #include "common/type/string.h"
 #include "common/type/stringList.h"
+#include "mysql/engine/archive.h"
 #include "mysql/engine/aria.h"
+#include "mysql/engine/connect.h"
+#include "mysql/engine/csv.h"
 #include "mysql/engine/engine.h"
 #include "mysql/engine/innodb.h"
 #include "mysql/engine/isam.h"
+#include "mysql/engine/merge.h"
+#include "mysql/engine/mroonga.h"
 #include "mysql/engine/myisam.h"
 #include "mysql/engine/rocksdb.h"
 #include "mysql/engine/toku.h"
@@ -48,6 +53,11 @@ static const EngineRegistryEntry engineRegistry[] = {
     {{"rocksdb", "myrocks", NULL}, engineRocksdbHandler},
     {{"aria", NULL}, engineAriaHandler},
     {{"tokudb", NULL}, engineTokuHandler},
+    {{"csv", NULL}, engineCsvHandler},
+    {{"archive", NULL}, engineArchiveHandler},
+    {{"mrg_myisam", "merge", NULL}, engineMergeHandler},
+    {{"connect", NULL}, engineConnectHandler},
+    {{"mroonga", NULL}, engineMroongaHandler},
 };
 
 /**********************************************************************************************************************************/

@@ -16,6 +16,7 @@ Hot-Mode (Online) Backup Orchestrator
 #include "mysql/interface.h"
 #include "mysql/lock.h"
 #include "mysql/manifest.h"
+#include "mysql/miscFiles.h"
 #include "mysql/sanity.h"
 #include "storage/storage.h"
 
@@ -36,14 +37,24 @@ static bool hbHasIsam(const MysqlDataDirInfo *const i)   { return i->hasIsam; }
 static bool hbHasAria(const MysqlDataDirInfo *const i)   { return i->hasAria; }
 static bool hbHasMyrocks(const MysqlDataDirInfo *const i){ return i->hasMyrocks; }
 static bool hbHasTokudb(const MysqlDataDirInfo *const i) { return i->hasTokudb; }
+static bool hbHasCsv(const MysqlDataDirInfo *const i)    { return i->hasCsv; }
+static bool hbHasArchive(const MysqlDataDirInfo *const i){ return i->hasArchive; }
+static bool hbHasMerge(const MysqlDataDirInfo *const i)  { return i->hasMerge; }
+static bool hbHasConnect(const MysqlDataDirInfo *const i){ return i->hasConnect; }
+static bool hbHasMroonga(const MysqlDataDirInfo *const i){ return i->hasMroonga; }
 
 static const HotBackupEngineRow hotBackupEngines[] = {
-    {hbHasInnodb,  "innodb",  "InnoDB"},
-    {hbHasMyisam,  "myisam",  "MyISAM"},
-    {hbHasIsam,    "isam",    "ISAM"},
-    {hbHasAria,    "aria",    "Aria"},
-    {hbHasMyrocks, "rocksdb", "RocksDB/MyRocks"},
-    {hbHasTokudb,  "tokudb",  "TokuDB"},
+    {hbHasInnodb,  "innodb",     "InnoDB"},
+    {hbHasMyisam,  "myisam",     "MyISAM"},
+    {hbHasIsam,    "isam",       "ISAM"},
+    {hbHasAria,    "aria",       "Aria"},
+    {hbHasMyrocks, "rocksdb",    "RocksDB/MyRocks"},
+    {hbHasTokudb,  "tokudb",     "TokuDB"},
+    {hbHasCsv,     "csv",        "CSV"},
+    {hbHasArchive, "archive",    "Archive"},
+    {hbHasMerge,   "mrg_myisam", "MERGE"},
+    {hbHasConnect, "connect",    "Connect"},
+    {hbHasMroonga, "mroonga",    "Mroonga"},
 };
 
 /***********************************************************************************************************************************
@@ -288,6 +299,11 @@ mysqlHotBackup(
                 storageCopyP(storageNewReadP(srcStorage, srcAutoCnf), storageNewWriteP(dstStorage, dstAutoCnf));
                 result->autoCnfCopied = true;
             }
+
+            // Step 8.5: miscellaneous files (.sdi, .CSV/.CSM, .opt, etc.) + empty schema directories. mysqld expects
+            // mysql/, performance_schema/, sys/ to be on disk for Data Dictionary initialization to succeed at restore time.
+            // Run under the same lock window as the engine copies — these files don't change shape during a lock.
+            mysqlMiscFilesCopy(srcStorage, dataPath, dstStorage, backupPath);
 
             // Step 9: block-commit transition. After this no new transactions commit; the binlog stops advancing.
             LOG_INFO("hot backup: blocking commits");
