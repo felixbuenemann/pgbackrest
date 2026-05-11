@@ -8,6 +8,11 @@ Algorithm:
   4. waitpid the child
   5. Parse the captured line for "Ver X.Y.Z" + vendor markers
   6. Return MysqlBinaryInfo
+
+Implementation note (don't swap to common/exec.c): The Exec wrapper in src/common/exec.c is designed for LONG-LIVED processes
+(ssh sessions, remote workers) and treats a child exiting during normal stream consumption as `execCheckStatusError("terminated
+unexpectedly")` — even with a 0 exit code. For one-shot commands that exit immediately after writing their output, the manual
+fork+pipe+waitpid pattern below is correct and ~50 lines is a reasonable cost.
 ***********************************************************************************************************************************/
 #include <build.h>
 
