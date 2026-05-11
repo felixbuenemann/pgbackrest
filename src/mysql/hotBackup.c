@@ -210,15 +210,18 @@ mysqlHotBackup(
                 sanity.serverIdSet ? "yes" : "no");
         }
 
-        // Step 2: inspect the live datadir
+        // Step 2: inspect the live datadir. Run in the caller's PRIOR context so the returned struct (and its strDup'd
+        // serverUuid etc.) survive this function's TEMP_END.
         LOG_INFO_FMT("hot backup: inspecting datadir at %s", strZ(dataPath));
-        MysqlDataDirInfo *const info = mysqlDataDirInspect(srcStorage, dataPath);
+        MysqlDataDirInfo *info = NULL;
 
         MEM_CONTEXT_PRIOR_BEGIN()
         {
-            result->info = info;
+            info = mysqlDataDirInspect(srcStorage, dataPath);
         }
         MEM_CONTEXT_PRIOR_END();
+
+        result->info = info;
 
         // Step 3: select lock method
         lockMethod = mysqlLockMethodSelect(client, lockPreference);

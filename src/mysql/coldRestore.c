@@ -8,7 +8,6 @@ Cold-Mode (Offline) Restore Orchestrator
 #include "common/log.h"
 #include "common/memContext.h"
 #include "common/type/string.h"
-#include "common/type/stringList.h"
 #include "mysql/coldRestore.h"
 #include "mysql/interface.h"
 #include "mysql/manifest.h"
@@ -104,8 +103,16 @@ mysqlColdRestore(
         MEM_CONTEXT_PRIOR_END();
 
         // Step 1: read the manifest. Failure here is fatal — we won't restore a directory we can't identify.
+        // Run mysqlBackupManifestRead in the caller's PRIOR context so the parsed struct and its strDup'd fields survive
+        // this function's TEMP_END (same pattern as coldBackup / hotBackup do for mysqlDataDirInspect).
         LOG_INFO_FMT("cold restore: reading manifest from %s", strZ(backupPath));
-        MysqlBackupManifestParsed *const manifest = mysqlBackupManifestRead(srcStorage, backupPath);
+        MysqlBackupManifestParsed *manifest = NULL;
+
+        MEM_CONTEXT_PRIOR_BEGIN()
+        {
+            manifest = mysqlBackupManifestRead(srcStorage, backupPath);
+        }
+        MEM_CONTEXT_PRIOR_END();
 
         if (manifest == NULL)
         {
@@ -115,11 +122,7 @@ mysqlColdRestore(
                 MYSQL_FILE_BACKUP_INFO, strZ(backupPath));
         }
 
-        MEM_CONTEXT_PRIOR_BEGIN()
-        {
-            result->manifest = manifest;
-        }
-        MEM_CONTEXT_PRIOR_END();
+        result->manifest = manifest;
 
         LOG_INFO_FMT(
             "cold restore: manifest indicates vendor=%u, version=%u, taken=%s",

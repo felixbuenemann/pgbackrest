@@ -82,15 +82,20 @@ mysqlColdBackup(
         }
         MEM_CONTEXT_PRIOR_END();
 
-        // Step 1: inspect the datadir. Result lives in the parent context so it survives the TEMP_END.
+        // Step 1: inspect the datadir. Run in the caller's PRIOR context so the returned info struct (and its strDup'd
+        // fields like serverUuid) live past this function's TEMP_END. Otherwise result->info would dangle — surfaced on
+        // macOS where the heap reclaims promptly; on Linux the freed memory was usually still readable so the test only
+        // failed under valgrind or with aggressive allocators.
         LOG_INFO_FMT("cold backup: inspecting datadir at %s", strZ(dataPath));
-        MysqlDataDirInfo *const info = mysqlDataDirInspect(srcStorage, dataPath);
+        MysqlDataDirInfo *info = NULL;
 
         MEM_CONTEXT_PRIOR_BEGIN()
         {
-            result->info = info;
+            info = mysqlDataDirInspect(srcStorage, dataPath);
         }
         MEM_CONTEXT_PRIOR_END();
+
+        result->info = info;
 
         // Step 2: dispatch to every present engine handler. The cold-safety invariant (server shutdown) means each handler's
         // copyOnline callback is safe to call without a live MysqlClient — the existing handlers don't reference ctx->client.
