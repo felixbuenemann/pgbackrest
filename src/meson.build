@@ -253,6 +253,7 @@ src_mybackrest = [
     'mysql/engine/myisam.c',
     'mysql/engine/rocksdb.c',
     'mysql/engine/toku.c',
+    'mysql/hotBackup.c',
     'mysql/interface.c',
     'mysql/lock.c',
     'mysql/manifest.c',
@@ -435,5 +436,11 @@ executable(
 executable(
     'standalone-verify-test',
     src_common, src_mybackrest, files('../test/src/standalone/verifyTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+executable(
+    'standalone-hot-backup-test',
+    src_common, src_mybackrest, files('../test/src/standalone/hotBackupTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
