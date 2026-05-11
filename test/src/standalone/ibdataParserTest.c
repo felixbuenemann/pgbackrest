@@ -127,8 +127,31 @@ main(void)
         MysqlControl ctlWith80 = mysqlControlFromIbdata(storage, STRDEF("."));
         expect("mysql.ibd present → versionNum 80000 (8.0+)", ctlWith80.versionNum == 80000);
 
-        // pageChecksum default
-        expect("default pageChecksum = crc32", ctlWith80.pageChecksum == mysqlPageChecksumCrc32);
+        // Without the FCRC32 marker bit, the algorithm is not on-disk-recordable for plain MySQL/Percona — caller must probe.
+        expect("plain MySQL/Percona pageChecksum = None (caller probes adaptively)", ctlWith80.pageChecksum == mysqlPageChecksumNone);
+        expect("encrypted = false (no encryption bit set)", !ctlWith80.encrypted);
+
+        // ---- FSP_FLAGS_MASK_FCRC32_MARKER (MariaDB) ----
+        // Build a page with bit 4 set in FSP_SPACE_FLAGS — definitively signals MariaDB full_crc32 mode.
+        unsigned char *const fcrc32Page = buildIbdata(0);
+        fcrc32Page[FSP_SPACE_FLAGS + 3] |= 0x10;                        // bit 4 = FSP_FLAGS_FCRC32_MASK_MARKER
+        writePage("/tmp/mybackrest-ibdata-test/ibdata1", fcrc32Page);
+        unlink("/tmp/mybackrest-ibdata-test/mysql.ibd");
+        free(fcrc32Page);
+
+        MysqlControl fcrc32Ctl = mysqlControlFromIbdata(storage, STRDEF("."));
+        expect("FCRC32 marker bit → pageChecksum = FullCrc32", fcrc32Ctl.pageChecksum == mysqlPageChecksumFullCrc32);
+
+        // ---- FSP_FLAGS_MASK_ENCRYPTION ----
+        // Build a page with the encryption bit set (bit 13 = 0x2000).
+        unsigned char *const encPage = buildIbdata(0);
+        // FSP_SPACE_FLAGS is 4 bytes big-endian; bit 13 is in the top half. 0x2000 = 0x00 0x00 0x20 0x00 BE
+        encPage[FSP_SPACE_FLAGS + 2] |= 0x20;
+        writePage("/tmp/mybackrest-ibdata-test/ibdata1", encPage);
+        free(encPage);
+
+        MysqlControl encCtl = mysqlControlFromIbdata(storage, STRDEF("."));
+        expect("ENCRYPTION bit set → encrypted=true", encCtl.encrypted);
 
         // Missing ibdata1 AND mysql.ibd → throws FileMissingError
         unlink("/tmp/mybackrest-ibdata-test/ibdata1");

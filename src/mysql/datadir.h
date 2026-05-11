@@ -60,6 +60,10 @@ typedef struct MysqlDataDirInfo
     bool hasAria;                                                       // any *.MAD or aria_log_control
     bool hasMyrocks;                                                    // .rocksdb/ or #rocksdb/ subdir
     bool hasTokudb;                                                     // any *.tokudb or tokudb.environment
+
+    // Security / format flags surfaced from the system tablespace
+    bool encrypted;                                                     // FSP_FLAGS_MASK_ENCRYPTION bit set — needs keyring at restore
+    MysqlPageChecksumAlgo pageChecksum;                                 // Detected by trial validation on a real page (None = unknown)
 } MysqlDataDirInfo;
 
 // Inspect the datadir at dataPath. Always returns a non-NULL struct (zero-valued fields mean "not detected").

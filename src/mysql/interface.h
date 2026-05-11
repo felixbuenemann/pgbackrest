@@ -123,6 +123,8 @@ typedef struct MysqlControl
     MysqlRedoLayout redoLayout;                                         // Redo files location/format
     MysqlPageChecksumAlgo pageChecksum;                                 // From backup_my.cnf or detected
     uint64_t lsnCheckpoint;                                             // Last checkpoint LSN at backup start
+    bool encrypted;                                                     // FSP_FLAGS_MASK_ENCRYPTION bit set in FSP_SPACE_FLAGS
+    bool hasSdi;                                                        // FSP_FLAGS_MASK_SDI bit (8.0+ Serialized Dictionary Info)
 } MysqlControl;
 
 /***********************************************************************************************************************************
@@ -140,6 +142,28 @@ FN_EXTERN MysqlRedoLayout mysqlRedoLayoutDetect(const Storage *storage, const St
 // Validate one InnoDB page's checksum; returns true if the page is intact.
 FN_EXTERN bool mysqlPageChecksumValidate(
     const unsigned char *page, MysqlPageSize pageSize, MysqlPageChecksumAlgo algo, uint32_t pageNo);
+
+// Adaptive validate: try CRC32, then MariaDB full_crc32, then legacy "innodb" — return the algorithm that matched (or
+// mysqlPageChecksumNone if none matched). Used during cold backup when the algorithm isn't known up front; the orchestrator
+// remembers the matching algorithm after the first successful page so subsequent pages skip the trial loop.
+FN_EXTERN MysqlPageChecksumAlgo mysqlPageChecksumValidateAdaptive(
+    const unsigned char *page, MysqlPageSize pageSize, uint32_t pageNo);
+
+// FSP_SPACE_FLAGS bit positions — only ones we currently care about. Per
+// /home/user/mysql-server/storage/innobase/include/fsp0types.h:
+//   POST_ANTELOPE @ 0 (1)  ZIP_SSIZE @ 1..4 (4)  ATOMIC_BLOBS @ 5 (1)  PAGE_SSIZE @ 6..9 (4)
+//   DATA_DIR @ 10 (1)  SHARED @ 11 (1)  TEMPORARY @ 12 (1)  ENCRYPTION @ 13 (1)  SDI @ 14 (1)
+#define FSP_FLAGS_POS_ENCRYPTION                                    13
+#define FSP_FLAGS_MASK_ENCRYPTION                                   (1U << FSP_FLAGS_POS_ENCRYPTION)
+#define FSP_FLAGS_POS_SDI                                           14
+#define FSP_FLAGS_MASK_SDI                                          (1U << FSP_FLAGS_POS_SDI)
+
+// MariaDB-only: full_crc32 algorithm marker. Per
+// /home/user/mariadb-server/storage/innobase/include/fsp0types.h FSP_FLAGS_FCRC32_POS_MARKER, the bit lives at position 4 (mask
+// 0x10) of FSP_SPACE_FLAGS. MariaDB defines `fil_space_t::full_crc32(flags)` as `flags & FSP_FLAGS_FCRC32_MASK_MARKER`. When
+// this bit is set we know definitively the tablespace uses full_crc32; when clear we have to fall back to the trial-and-error
+// adaptive validator (CRC32 vs legacy innodb hash) because pure MySQL/Percona doesn't record the algorithm on disk.
+#define FSP_FLAGS_MASK_FCRC32_MARKER                                0x10U
 
 /***********************************************************************************************************************************
 Result of parsing the redo log file header's LOG_HEADER_CREATOR string (offset 16, 32 bytes max, NUL-terminated).

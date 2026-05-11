@@ -207,6 +207,15 @@ mysqlControlFromIbdata(const Storage *const storage, const String *const dataPat
         }
 
         result.pageSize = mysqlPageSizeFromFlags(flags);
+        result.encrypted = (flags & FSP_FLAGS_MASK_ENCRYPTION) != 0;
+        result.hasSdi = (flags & FSP_FLAGS_MASK_SDI) != 0;
+
+        // Definitive checksum-algo signal: MariaDB sets bit 4 to mark full_crc32 mode. For everyone else the algo isn't stored
+        // on disk — leave pageChecksum at None and let the adaptive validator probe at copy time.
+        if (flags & FSP_FLAGS_MASK_FCRC32_MARKER)
+            result.pageChecksum = mysqlPageChecksumFullCrc32;
+        else
+            result.pageChecksum = mysqlPageChecksumNone;                // Means "unknown — caller should probe adaptively"
 
         // Layout flavor — presence of mysql.ibd is a hard signal for 8.0+ data dictionary. Without it we return the absolute
         // minimum supported version (5.5) as a SAFE LOWER BOUND; callers (notably mysqlDataDirInspect) refine upward using
@@ -219,12 +228,42 @@ mysqlControlFromIbdata(const Storage *const storage, const String *const dataPat
         // Redo layout follows from datadir layout
         result.redoLayout = mysqlRedoLayoutDetect(storage, dataPath);
 
-        // Default to the modern checksum algorithm; mysqlPageChecksumValidate accepts both crc32 variants.
-        result.pageChecksum = mysqlPageChecksumCrc32;
     }
     MEM_CONTEXT_TEMP_END();
 
     FUNCTION_LOG_RETURN(MY_CONTROL, result);
+}
+
+/**********************************************************************************************************************************/
+FN_EXTERN MysqlPageChecksumAlgo
+mysqlPageChecksumValidateAdaptive(const unsigned char *const page, const MysqlPageSize pageSize, const uint32_t pageNo)
+{
+    FUNCTION_TEST_BEGIN();
+        FUNCTION_TEST_PARAM_P(VOID, page);
+        FUNCTION_TEST_PARAM(UINT, pageSize);
+        FUNCTION_TEST_PARAM(UINT, pageNo);
+    FUNCTION_TEST_END();
+
+    ASSERT(page != NULL);
+
+    // Order matters: try the most-likely-to-succeed first to keep the hot path cheap.
+    //   1. CRC32 — default for MySQL 5.7+ and Percona; vast majority of modern datadirs match here on the first try.
+    //   2. legacy "innodb" — MySQL 5.5/5.6 default; older installations.
+    //   3. full_crc32 — MariaDB 10.5+ with --innodb-checksum-algorithm=full_crc32; rarer but unmistakable on match.
+    //
+    // The validator already has a torn-page (FIL_PAGE_LSN low ↔ trailer LSN low) and page-no precheck, so a true torn page
+    // shows up as "all algorithms fail" rather than spuriously matching some other algo. False positives across algorithms
+    // are vanishingly unlikely given the 32-bit checksum domain.
+    if (mysqlPageChecksumValidate(page, pageSize, mysqlPageChecksumCrc32, pageNo))
+        FUNCTION_TEST_RETURN(STRING_ID, mysqlPageChecksumCrc32);
+
+    if (mysqlPageChecksumValidate(page, pageSize, mysqlPageChecksumInnodb, pageNo))
+        FUNCTION_TEST_RETURN(STRING_ID, mysqlPageChecksumInnodb);
+
+    if (mysqlPageChecksumValidate(page, pageSize, mysqlPageChecksumFullCrc32, pageNo))
+        FUNCTION_TEST_RETURN(STRING_ID, mysqlPageChecksumFullCrc32);
+
+    FUNCTION_TEST_RETURN(STRING_ID, mysqlPageChecksumNone);
 }
 
 /***********************************************************************************************************************************

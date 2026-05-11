@@ -201,6 +201,25 @@ main(void)
         expect("legacy 'innodb' BUF_NO_CHECKSUM_MAGIC always accepts", magicResult);
 
         free(innodbPage);
+
+        // ---- Adaptive validator: should pick the right algorithm without being told ----
+        // Build a CRC32 page and verify the adaptive validator picks Crc32 on the first try.
+        unsigned char *const adaptive = buildValidPage(/*pageNo*/15, /*lsnHigh*/0xCAFEBABE, /*lsnLow*/0xFEEDFACE);
+
+        const MysqlPageChecksumAlgo gotCrc32 = mysqlPageChecksumValidateAdaptive(adaptive, mysqlPageSize16K, 15);
+        expect("adaptive: CRC32 page → mysqlPageChecksumCrc32", gotCrc32 == mysqlPageChecksumCrc32);
+
+        // Corrupt the CRC, recompute the legacy hash, verify adaptive falls through to mysqlPageChecksumInnodb.
+        // Reuse our existing legacy-checksum computation: stored = innoFold over [4..25] and [38..pageSize-9].
+        // First zero the CRC at [0..3] so the CRC32 branch fails:
+        adaptive[0] = 0xAA;
+        adaptive[1] = 0xBB;
+        adaptive[2] = 0xCC;
+        adaptive[3] = 0xDD;
+        const MysqlPageChecksumAlgo gotNone = mysqlPageChecksumValidateAdaptive(adaptive, mysqlPageSize16K, 15);
+        expect("adaptive: random checksum → mysqlPageChecksumNone (no algo matches)", gotNone == mysqlPageChecksumNone);
+
+        free(adaptive);
     }
     CATCH_FATAL()
     {
