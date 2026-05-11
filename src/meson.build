@@ -252,6 +252,7 @@ src_mybackrest = [
     'mysql/engine/toku.c',
     'mysql/interface.c',
     'mysql/lock.c',
+    'mysql/manifest.c',
     'mysql/sanity.c',
     'postgres/client.c',
     'postgres/interface.c',
@@ -387,5 +388,11 @@ executable(
 executable(
     'standalone-datadir-inspect-test',
     src_common, src_mybackrest, files('../test/src/standalone/dataDirInspectTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+executable(
+    'standalone-manifest-test',
+    src_common, src_mybackrest, files('../test/src/standalone/manifestTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
