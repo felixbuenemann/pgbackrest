@@ -198,8 +198,57 @@ main(void)
             "last GTID  = 11223344-5566-7788-99aa-bbccddeeff00:99",
             info->lastGtid != NULL && strEqZ(info->lastGtid, "11223344-5566-7788-99aa-bbccddeeff00:99"));
 
-        // Cleanup
         unlink(path);
+
+        // ---- MariaDB GTID_EVENT (type 162) ----
+        // Layout per /home/user/mariadb-server/sql/log_event_server.cc Gtid_log_event::write():
+        //   common header 19 bytes, then payload:
+        //     bytes 0..7   seq_no (uint64 LE)
+        //     bytes 8..11  domain_id (uint32 LE)
+        //     byte 12      flags2 (uint8)
+        //   server_id sits in the common header at offset 5..8 (LE).
+        //   Rendered as "domain-server_id-seq_no" (e.g. "0-1-100").
+        const size_t mGtidPostHeader = 13;
+        const size_t mGtidEventSize = 19 + mGtidPostHeader;
+        const size_t mTotal = 4 + fdeSize + mGtidEventSize + mGtidEventSize;
+
+        unsigned char *const mbuf = (unsigned char *)calloc(1, mTotal);
+        memcpy(mbuf, "\xfe""bin", 4);
+
+        // FDE
+        writeEventHeader(mbuf, 4, /*ts*/0, /*type*/15, /*srvId*/1, /*size*/(uint32_t)fdeSize, /*pos*/(uint32_t)(4 + fdeSize), /*flags*/0);
+        mbuf[4 + 19 + 0] = 4;                                           // binlog_version
+
+        // GTID_EVENT #1: domain=2, server_id=7, seq_no=100
+        const size_t g1mOff = 4 + fdeSize;
+        writeEventHeader(mbuf, g1mOff, 0, /*type*/162, /*server_id*/7, (uint32_t)mGtidEventSize, (uint32_t)(g1mOff + mGtidEventSize), 0);
+        const size_t g1mPayload = g1mOff + 19;
+        writeU64Le(mbuf, g1mPayload + 0, 100);                          // seq_no
+        // domain_id (uint32 LE) at payload+8: write 2
+        mbuf[g1mPayload + 8] = 2;
+
+        // GTID_EVENT #2: domain=2, server_id=7, seq_no=200
+        const size_t g2mOff = g1mOff + mGtidEventSize;
+        writeEventHeader(mbuf, g2mOff, 0, /*type*/162, /*server_id*/7, (uint32_t)mGtidEventSize, (uint32_t)(g2mOff + mGtidEventSize), 0);
+        const size_t g2mPayload = g2mOff + 19;
+        writeU64Le(mbuf, g2mPayload + 0, 200);
+        mbuf[g2mPayload + 8] = 2;
+
+        const char *const mPath = "/tmp/mybackrest-mariadb-binlog-test.bin";
+        FILE *const mfp = fopen(mPath, "wb");
+        if (mfp == NULL) THROW(FileWriteError, "fopen mariadb test");
+        fwrite(mbuf, 1, mTotal, mfp);
+        fclose(mfp);
+        free(mbuf);
+
+        MysqlBinlogInfo *const mariaInfo = mysqlBinlogScan(storage, STRDEF("mybackrest-mariadb-binlog-test.bin"));
+
+        expect("MariaDB first GTID = 2-7-100",
+            mariaInfo->firstGtid != NULL && strEqZ(mariaInfo->firstGtid, "2-7-100"));
+        expect("MariaDB last GTID = 2-7-200",
+            mariaInfo->lastGtid != NULL && strEqZ(mariaInfo->lastGtid, "2-7-200"));
+
+        unlink(mPath);
     }
     CATCH_FATAL()
     {

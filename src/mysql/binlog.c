@@ -140,7 +140,7 @@ mysqlBinlogScan(const Storage *const storage, const String *const binlogPath)
                 }
             }
 
-            // GTID_LOG_EVENT: capture first and last for the file
+            // GTID_LOG_EVENT (MySQL, type 33): payload = 1B flags + 16B uuid + 8B gno → "uuid:gno"
             if (typeCode == BINLOG_EVENT_GTID && eventSize >= BINLOG_EVENT_HEADER_SIZE + 25)
             {
                 const unsigned char *const payload = hdr + BINLOG_EVENT_HEADER_SIZE;
@@ -148,6 +148,23 @@ mysqlBinlogScan(const Storage *const storage, const String *const binlogPath)
                 String *const uuid = mysqlBinlogFormatUuid(payload + 1);
                 const uint64_t gno = mysqlBinlogReadU64Le(payload + 17);
                 String *const composed = strNewFmt("%s:%" PRIu64, strZ(uuid), gno);
+
+                if (firstGtid == NULL)
+                    firstGtid = composed;
+
+                lastGtid = composed;
+            }
+
+            // GTID_EVENT (MariaDB, type 162): payload = 8B seq_no + 4B domain_id + 1B flags
+            // server_id comes from the common header at offset 5..8 (LE). Rendered as "domain-server_id-seq_no".
+            if (typeCode == BINLOG_EVENT_GTID_MARIADB && eventSize >= BINLOG_EVENT_HEADER_SIZE + 13)
+            {
+                const unsigned char *const payload = hdr + BINLOG_EVENT_HEADER_SIZE;
+                const uint64_t seqNo = mysqlBinlogReadU64Le(payload + 0);
+                const uint32_t domainId = mysqlBinlogReadU32Le(payload + 8);
+                const uint32_t serverId = mysqlBinlogReadU32Le(hdr + 5);                // common header offset 5..8 (LE)
+
+                String *const composed = strNewFmt("%u-%u-%" PRIu64, domainId, serverId, seqNo);
 
                 if (firstGtid == NULL)
                     firstGtid = composed;

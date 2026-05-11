@@ -27,10 +27,18 @@ Binlog event type codes (subset we care about)
 #define BINLOG_EVENT_CRC32_SIZE                                     4
 
 #define BINLOG_EVENT_FORMAT_DESCRIPTION                             15
-#define BINLOG_EVENT_GTID                                           33
+#define BINLOG_EVENT_GTID                                           33      // MySQL GTID_LOG_EVENT
 #define BINLOG_EVENT_PREVIOUS_GTIDS                                 35
 #define BINLOG_EVENT_ANONYMOUS_GTID                                 34
 #define BINLOG_EVENT_ROTATE                                         4
+
+// MariaDB-specific event type, from /home/user/mariadb-server/sql/log_event.h:
+//   GTID_EVENT = 162  — payload after the 19-byte common header is:
+//     bytes 0..7   seq_no (uint64 LE)
+//     bytes 8..11  domain_id (uint32 LE)
+//     byte 12      flags2 (uint8)
+//   Rendered as "domain-server_id-seq_no" where server_id comes from the common header (offset 5..8 LE).
+#define BINLOG_EVENT_GTID_MARIADB                                   162
 
 /***********************************************************************************************************************************
 Binlog file metadata captured during a single forward scan
