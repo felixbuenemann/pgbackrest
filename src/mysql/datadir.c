@@ -233,6 +233,30 @@ mysqlDataDirInspect(const Storage *const storage, const String *const dataPath)
 
                 // mysqlControlFromIbdata already infers 50700 vs 80000; honor it as a floor.
                 mysqlDataDirRaiseVersion(info, ctl.versionNum);
+
+                // If pageChecksum is still unknown (FCRC32 marker bit was clear → could be CRC32 or legacy "innodb"), probe
+                // page 0 itself with the adaptive validator. Page 0 carries an FSP_HEADER but its FIL header + checksum field
+                // are standard, so the same validator works. The result tells us which algorithm is in use; subsequent pages
+                // can skip the probe.
+                if (info->pageChecksum == mysqlPageChecksumNone && info->pageSize > 0)
+                {
+                    const String *const probePath =
+                        sawIbdata
+                            ? strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_IBDATA1)
+                            : strNewFmt("%s/%s", strZ(dataPath), MYSQL_FILE_MYSQL_IBD);
+
+                    Buffer *const page0 = storageGetP(
+                        storageNewReadP(storage, probePath, .limit = VARUINT64(info->pageSize)));
+
+                    if (page0 != NULL && bufUsed(page0) >= info->pageSize)
+                    {
+                        const MysqlPageChecksumAlgo detected =
+                            mysqlPageChecksumValidateAdaptive(bufPtrConst(page0), info->pageSize, /*pageNo*/ 0);
+
+                        if (detected != mysqlPageChecksumNone)
+                            info->pageChecksum = detected;
+                    }
+                }
             }
             CATCH_ANY()
             {

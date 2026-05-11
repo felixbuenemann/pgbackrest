@@ -14,6 +14,7 @@ inspector says "5.7" based on the absence of mysql.ibd, regardless of what binar
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <zlib.h>
 
 #include "common/debug.h"
 #include "common/error/error.h"
@@ -300,6 +301,49 @@ main(void)
 
         MysqlDataDirInfo *infoBarracuda = mysqlDataDirInspect(storage, STRDEF("."));
         expect("[Barracuda] antelope=false (POST_ANTELOPE bit set)", !infoBarracuda->antelope);
+
+        // ============================================================================================================================
+        // Scenario 6d: adaptive checksum probe — inspector reads page 0 and detects the actual algorithm
+        //   Build an ibdata1 page 0 with a real CRC32 checksum that the inspector should probe and detect.
+        // ============================================================================================================================
+        rmrf(root);
+        mkdirP(root);
+        mkdirP("/tmp/mybackrest-datadir-test");
+
+        unsigned char crc32Page[16384];
+        memset(crc32Page, 0, sizeof(crc32Page));
+
+        // Set FIL_PAGE_OFFSET = 0 (already zero)
+        // Set FIL_PAGE_LSN trailer match (low half of FIL_PAGE_LSN must match low half of trailer)
+        crc32Page[16 + 7] = 0x99;                                       // FIL_PAGE_LSN low byte
+        crc32Page[16383] = 0x99;                                        // trailer LSN low byte (last byte of page)
+
+        // Set FSP_SPACE_FLAGS at offset 54 to all-zero (default 16K page, Antelope, no encryption, no FCRC32 marker)
+
+        // Sprinkle data starting at byte 58 (after FSP_SPACE_FLAGS at 54..57). Leaves FSP_SPACE_ID (38..41) zero so it matches
+        // the also-zero FIL_PAGE_SPACE_ID (34..37) — required or mysqlControlFromIbdata throws "header is corrupt".
+        for (size_t i = 58; i < 16384 - 8; i++)
+            crc32Page[i] = (unsigned char)((i * 11) & 0xFF);
+
+        // Compute InnoDB CRC32: c1 = crc32(page[4..25] = 22 bytes), c2 = crc32(page[38..16375]). Matches the canonical
+        // buf_calc_page_crc32() in mysql-server/storage/innobase/buf/checksum.cc.
+        const uint32_t c1 = (uint32_t)crc32(0L, (const Bytef *)(crc32Page + FIL_PAGE_OFFSET),
+                                            FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET);
+        const uint32_t c2 = (uint32_t)crc32(0L, (const Bytef *)(crc32Page + FIL_PAGE_DATA),
+                                            16384 - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE);
+        const uint32_t expected = c1 ^ c2;
+        crc32Page[0] = (unsigned char)((expected >> 24) & 0xFF);
+        crc32Page[1] = (unsigned char)((expected >> 16) & 0xFF);
+        crc32Page[2] = (unsigned char)((expected >> 8) & 0xFF);
+        crc32Page[3] = (unsigned char)(expected & 0xFF);
+
+        FILE *fpProbe = fopen("/tmp/mybackrest-datadir-test/ibdata1", "wb");
+        if (fpProbe == NULL) THROW(FileWriteError, "fopen");
+        fwrite(crc32Page, 1, sizeof(crc32Page), fpProbe);
+        fclose(fpProbe);
+
+        MysqlDataDirInfo *infoProbe = mysqlDataDirInspect(storage, STRDEF("."));
+        expect("[probe] inspector detected CRC32 algorithm from page 0", infoProbe->pageChecksum == mysqlPageChecksumCrc32);
 
         // ============================================================================================================================
         // Scenario 7: empty / non-MySQL directory — must not throw, must return all-zero

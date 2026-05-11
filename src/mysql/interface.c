@@ -242,6 +242,35 @@ mysqlControlFromIbdata(const Storage *const storage, const String *const dataPat
 }
 
 /**********************************************************************************************************************************/
+FN_EXTERN unsigned int
+mysqlPageType(const unsigned char *const page)
+{
+    ASSERT(page != NULL);
+
+    return ((unsigned int)page[FIL_PAGE_TYPE] << 8) | (unsigned int)page[FIL_PAGE_TYPE + 1];
+}
+
+/**********************************************************************************************************************************/
+FN_EXTERN bool
+mysqlPageIsValidatable(const unsigned char *const page)
+{
+    ASSERT(page != NULL);
+
+    const unsigned int t = mysqlPageType(page);
+
+    // Compressed pages have a non-standard checksum layout — trust them; the next page's LSN will catch torn-write fallout
+    if (t == FIL_PAGE_TYPE_COMPRESSED || t == FIL_PAGE_TYPE_COMPRESSED_AND_ENCRYPTED)
+        return false;
+
+    // Encrypted pages: stored checksum is over ciphertext, which would fail without decryption. Mark non-validatable; the
+    // orchestrator will use the LSN-trailer pre-check (mysqlPageChecksumValidate's first guard) as a torn-write detector.
+    if (t == FIL_PAGE_TYPE_ENCRYPTED)
+        return false;
+
+    return true;
+}
+
+/**********************************************************************************************************************************/
 FN_EXTERN MysqlPageChecksumAlgo
 mysqlPageChecksumValidateAdaptive(const unsigned char *const page, const MysqlPageSize pageSize, const uint32_t pageNo)
 {
@@ -580,8 +609,15 @@ mysqlPageChecksumValidate(
                                     (uint32_t)((uint32_t)page[2] << 8)  |
                                     (uint32_t)page[3];
 
-            // c1 covers bytes 4..25 (22 bytes); c2 covers bytes 38..pageSize-9 (pageSize - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE)
-            const uint32_t c1 = (uint32_t)crc32(0, page + FIL_PAGE_OFFSET, FIL_PAGE_LSN - FIL_PAGE_OFFSET);
+            // Per buf_calc_page_crc32() in mysql-server/storage/innobase/buf/checksum.cc:
+            //   c1 = crc32(page[FIL_PAGE_OFFSET..FIL_PAGE_FILE_FLUSH_LSN-1])      = bytes 4..25 (22 bytes)
+            //   c2 = crc32(page[FIL_PAGE_DATA..pageSize-FIL_PAGE_END_LSN_OLD_CHKSUM-1]) = bytes 38..pageSize-9
+            //   stored = c1 ^ c2
+            // EARLIER BUG: this code used FIL_PAGE_LSN - FIL_PAGE_OFFSET (= 12 bytes) for the first range, which is wrong.
+            // The correct upper bound is FIL_PAGE_FILE_FLUSH_LSN (= 26), giving 22 bytes — covers FIL_PAGE_OFFSET +
+            // FIL_PAGE_PREV + FIL_PAGE_NEXT + FIL_PAGE_LSN, skips FIL_PAGE_FILE_FLUSH_LSN + FIL_PAGE_SPACE_ID. Real InnoDB
+            // pages would have been spuriously rejected before this fix.
+            const uint32_t c1 = (uint32_t)crc32(0, page + FIL_PAGE_OFFSET, FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET);
             const uint32_t c2 = (uint32_t)crc32(
                 0, page + FIL_PAGE_DATA, (uInt)(pageSize - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE));
 

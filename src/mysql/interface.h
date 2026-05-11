@@ -151,6 +151,31 @@ FN_EXTERN bool mysqlPageChecksumValidate(
 FN_EXTERN MysqlPageChecksumAlgo mysqlPageChecksumValidateAdaptive(
     const unsigned char *page, MysqlPageSize pageSize, uint32_t pageNo);
 
+/***********************************************************************************************************************************
+FIL_PAGE_TYPE values from /home/user/mysql-server/storage/innobase/include/fil0fil.h. Only the ones we actively branch on are
+named here; the rest are documented inline.
+
+A "validatable" page is one whose checksum field at offset 0..3 was computed with one of the known algorithms over the
+standard page layout. COMPRESSED (14) and COMPRESSED_AND_ENCRYPTED (16) pages have a different layout (compression metadata
+in the FIL_PAGE_PREV/NEXT slots, then compressed data, then a punched-hole tail) so the standard checksum function would
+report a false-positive corruption. ENCRYPTED (15) pages are unreadable without the keyring; their checksum is computed over
+ciphertext but the LSN check still works.
+
+xtrabackup defers to InnoDB's BlockReporter::is_corrupted which knows about all three cases. We replicate the SAME decision
+("trust without validating") for COMPRESSED and COMPRESSED_AND_ENCRYPTED, since we have no way to validate them without
+linking InnoDB. For ENCRYPTED pages we do the LSN-mismatch check only.
+***********************************************************************************************************************************/
+#define FIL_PAGE_TYPE_COMPRESSED                                    14
+#define FIL_PAGE_TYPE_ENCRYPTED                                     15
+#define FIL_PAGE_TYPE_COMPRESSED_AND_ENCRYPTED                      16
+
+// Read the 2-byte big-endian FIL_PAGE_TYPE field
+FN_EXTERN unsigned int mysqlPageType(const unsigned char *page);
+
+// True if the page should run through mysqlPageChecksumValidate; false for compressed/encrypted pages whose checksum lives
+// elsewhere in the page (or which we can't validate without the keyring).
+FN_EXTERN bool mysqlPageIsValidatable(const unsigned char *page);
+
 // FSP_SPACE_FLAGS bit positions — only ones we currently care about. Per
 // /home/user/mysql-server/storage/innobase/include/fsp0types.h:
 //   POST_ANTELOPE @ 0 (1)  ZIP_SSIZE @ 1..4 (4)  ATOMIC_BLOBS @ 5 (1)  PAGE_SSIZE @ 6..9 (4)

@@ -74,7 +74,7 @@ buildValidPage(const uint32_t pageNo, const uint32_t lsnHigh, const uint32_t lsn
         page[i] = (unsigned char)((i * 7) & 0xFF);
 
     // Compute the InnoDB CRC32: c1 = crc32(page[4..25]), c2 = crc32(page[38..pageSize-9]); store BE at page[0..3]
-    const uint32_t c1 = (uint32_t)crc32(0, page + FIL_PAGE_OFFSET, FIL_PAGE_LSN - FIL_PAGE_OFFSET);
+    const uint32_t c1 = (uint32_t)crc32(0, page + FIL_PAGE_OFFSET, FIL_PAGE_FILE_FLUSH_LSN - FIL_PAGE_OFFSET);
     const uint32_t c2 = (uint32_t)crc32(0, page + FIL_PAGE_DATA, (uInt)(pageSize - FIL_PAGE_DATA - FIL_PAGE_TRAILER_SIZE));
     const uint32_t expected = c1 ^ c2;
 
@@ -220,6 +220,32 @@ main(void)
         expect("adaptive: random checksum → mysqlPageChecksumNone (no algo matches)", gotNone == mysqlPageChecksumNone);
 
         free(adaptive);
+
+        // ---- Page-type helpers: mysqlPageType + mysqlPageIsValidatable ----
+        // Build a page header with each "non-validatable" type and confirm the helper agrees.
+        unsigned char hdr[64];
+
+        memset(hdr, 0, sizeof(hdr));                                    // FIL_PAGE_TYPE = 0 (FIL_PAGE_TYPE_ALLOCATED) → validatable
+        expect("standard page (type=0) is validatable", mysqlPageIsValidatable(hdr));
+
+        // FIL_PAGE_TYPE = 14 (COMPRESSED), big-endian at offset 24..25
+        hdr[FIL_PAGE_TYPE]     = 0;
+        hdr[FIL_PAGE_TYPE + 1] = 14;
+        expect("FIL_PAGE_COMPRESSED → non-validatable", !mysqlPageIsValidatable(hdr));
+        expect("mysqlPageType returns 14", mysqlPageType(hdr) == 14);
+
+        // FIL_PAGE_TYPE = 15 (ENCRYPTED)
+        hdr[FIL_PAGE_TYPE + 1] = 15;
+        expect("FIL_PAGE_ENCRYPTED → non-validatable", !mysqlPageIsValidatable(hdr));
+
+        // FIL_PAGE_TYPE = 16 (COMPRESSED_AND_ENCRYPTED)
+        hdr[FIL_PAGE_TYPE + 1] = 16;
+        expect("FIL_PAGE_COMPRESSED_AND_ENCRYPTED → non-validatable", !mysqlPageIsValidatable(hdr));
+
+        // FIL_PAGE_TYPE = 17855 (FIL_PAGE_INDEX, normal data) — validatable
+        hdr[FIL_PAGE_TYPE]     = 0x45;
+        hdr[FIL_PAGE_TYPE + 1] = 0xBF;                                  // 17855 = 0x45BF (the FIL_PAGE_INDEX magic)
+        expect("FIL_PAGE_INDEX → validatable", mysqlPageIsValidatable(hdr));
     }
     CATCH_FATAL()
     {
