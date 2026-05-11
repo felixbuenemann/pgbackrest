@@ -136,8 +136,7 @@ Functions
 FN_EXTERN String *mysqlAutoCnfReadUuid(const Storage *storage, const String *dataPath);
 
 // Parse FSP_HEADER of page 0 of ibdata1 (or mysql.ibd on 8.0+) for page size + flags + space id. Wrapper that does the file
-// open + read; for callers that already have page 0 in memory (mysqlDataDirInspect runs an adaptive checksum probe right after
-// this and would otherwise re-read the same bytes), use mysqlControlFromPage0 directly.
+// open + read; callers that already have page 0 in memory should call mysqlControlFromPage0 directly to avoid re-reading.
 FN_EXTERN MysqlControl mysqlControlFromIbdata(const Storage *storage, const String *dataPath);
 
 // Decode the InnoDB control fields from an in-memory page-0 buffer. has80Dictionary tells the version-floor inference whether
