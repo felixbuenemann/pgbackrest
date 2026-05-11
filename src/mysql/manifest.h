@@ -70,4 +70,35 @@ FN_EXTERN String *mysqlBackupManifestRender(const MysqlDataDirInfo *info, const 
 FN_EXTERN void mysqlBackupManifestWrite(
     const Storage *storage, const String *backupPath, const MysqlDataDirInfo *info, const MysqlBackupBinlog *binlog);
 
+/***********************************************************************************************************************************
+Parsed manifest. Mirrors what was written: the inspector result is reconstructed (so restore-side compatibility checks can run
+against it), the optional binlog block is populated when the source manifest had a [binlog] section, and the [backrest] header
+gives the format/version/timestamp for sanity logging.
+***********************************************************************************************************************************/
+typedef struct MysqlBackupManifestParsed
+{
+    unsigned int format;                                                // [backrest] format = N
+    String *backrestVersion;                                            // [backrest] version
+    String *backupTime;                                                 // [backrest] backup_time (ISO 8601)
+
+    MysqlDataDirInfo *info;                                             // Reconstructed datadir info (always non-NULL on success)
+    MysqlBackupBinlog *binlog;                                          // NULL if the manifest had no [binlog] section
+} MysqlBackupManifestParsed;
+
+// Parse an INI text buffer and reconstruct the structured form. Throws FormatError on malformed input.
+FN_EXTERN MysqlBackupManifestParsed *mysqlBackupManifestParse(const String *text);
+
+// Read <backupPath>/mybackrest_backup_info and parse it. Returns NULL if the file is missing.
+FN_EXTERN MysqlBackupManifestParsed *mysqlBackupManifestRead(const Storage *storage, const String *backupPath);
+
+/***********************************************************************************************************************************
+Macros for function logging
+***********************************************************************************************************************************/
+FN_EXTERN void mysqlBackupManifestParsedToLog(const MysqlBackupManifestParsed *this, StringStatic *debugLog);
+
+#define FUNCTION_LOG_MY_MANIFEST_PARSED_TYPE                                                                                       \
+    MysqlBackupManifestParsed *
+#define FUNCTION_LOG_MY_MANIFEST_PARSED_FORMAT(value, buffer, bufferSize)                                                          \
+    FUNCTION_LOG_OBJECT_FORMAT(value, mysqlBackupManifestParsedToLog, buffer, bufferSize)
+
 #endif
