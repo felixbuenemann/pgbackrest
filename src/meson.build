@@ -244,6 +244,7 @@ src_mybackrest = [
     'mysql/binlog.c',
     'mysql/client.c',
     'mysql/coldBackup.c',
+    'mysql/coldRestore.c',
     'mysql/datadir.c',
     'mysql/engine/aria.c',
     'mysql/engine/engine.c',
@@ -414,5 +415,11 @@ executable(
 executable(
     'standalone-cold-backup-test',
     src_common, src_mybackrest, files('../test/src/standalone/coldBackupTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)
+
+executable(
+    'standalone-cold-restore-test',
+    src_common, src_mybackrest, files('../test/src/standalone/coldRestoreTest.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
