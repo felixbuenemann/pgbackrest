@@ -194,6 +194,21 @@ mysqlClientErrorWantsOldPassword(const unsigned int errnoVal)
     return errnoVal == CR_SECURE_AUTH || errnoVal == ER_NOT_SUPPORTED_AUTH_MODE;
 }
 
+/***********************************************************************************************************************************
+Human-readable "endpoint:port" string for connection-error messages. Picks host or socket, whichever was configured. Returned
+String lives in the current mem context.
+***********************************************************************************************************************************/
+static String *
+mysqlClientEndpoint(const MysqlClient *const this)
+{
+    const char *const endpoint =
+        mysqlClientHost(this) != NULL
+            ? strZ(mysqlClientHost(this))
+            : (mysqlClientSocket(this) != NULL ? strZ(mysqlClientSocket(this)) : "(unspecified)");
+
+    return strNewFmt("%s:%u", endpoint, mysqlClientPort(this));
+}
+
 /**********************************************************************************************************************************/
 FN_EXTERN MysqlClient *
 mysqlClientOpen(MysqlClient *const this)
@@ -222,46 +237,33 @@ mysqlClientOpen(MysqlClient *const this)
             const unsigned int errnoVal = mysql_errno(this->connection);
             const char *const errMsg = mysql_error(this->connection);
 
-            if (mysqlClientErrorWantsOldPassword(errnoVal))
+            if (!mysqlClientErrorWantsOldPassword(errnoVal))
+                THROW_FMT(DbConnectError, "unable to connect to MySQL server at %s: %s", strZ(mysqlClientEndpoint(this)), errMsg);
+
+            LOG_WARN_FMT(
+                "first connection attempt rejected (errno %u: %s); retrying with mysql_old_password enabled", errnoVal, errMsg);
+
+            // Fresh handle — libmariadb's auth state isn't safely reusable after a failed connect
+            mysql_close(this->connection);
+            this->connection = mysqlClientInitHandle(mysqlClientTimeout(this), /*allowOldPassword*/ true);
+
+            if (this->connection == NULL)
+                THROW(DbConnectError, "mysql_init returned NULL on retry");
+
+            if (!mysqlClientTryConnect(this->connection, this))
             {
-                LOG_WARN_FMT(
-                    "first connection attempt rejected (errno %u: %s); retrying with mysql_old_password enabled",
-                    errnoVal, errMsg);
-
-                // Fresh handle — libmariadb's auth state isn't safely reusable after a failed connect
-                mysql_close(this->connection);
-                this->connection = mysqlClientInitHandle(mysqlClientTimeout(this), /*allowOldPassword*/ true);
-
-                if (this->connection == NULL)
-                    THROW(DbConnectError, "mysql_init returned NULL on retry");
-
-                if (!mysqlClientTryConnect(this->connection, this))
-                {
-                    THROW_FMT(
-                        DbConnectError, "unable to connect to MySQL server at %s:%u (after old-password retry): %s",
-                        mysqlClientHost(this) != NULL ? strZ(mysqlClientHost(this)) :
-                            (mysqlClientSocket(this) != NULL ? strZ(mysqlClientSocket(this)) : "(unspecified)"),
-                        mysqlClientPort(this),
-                        mysql_error(this->connection));
-                }
-            }
-            else
-            {
-                // Non-auth failure: don't waste a round-trip on a retry that won't help
                 THROW_FMT(
-                    DbConnectError, "unable to connect to MySQL server at %s:%u: %s",
-                    mysqlClientHost(this) != NULL ? strZ(mysqlClientHost(this)) :
-                        (mysqlClientSocket(this) != NULL ? strZ(mysqlClientSocket(this)) : "(unspecified)"),
-                    mysqlClientPort(this),
-                    errMsg);
+                    DbConnectError, "unable to connect to MySQL server at %s (after old-password retry): %s",
+                    strZ(mysqlClientEndpoint(this)), mysql_error(this->connection));
             }
         }
 
         // Capture vendor + numeric version. mysql_get_server_version returns NN_NN_NN packed as MAJOR*10000 + MINOR*100 + PATCH.
         this->pub.serverVersionNum = (unsigned int)mysql_get_server_version(this->connection);
 
+        // version_comment is owned by the result set, so copy it into a String before mysql_free_result invalidates the pointer.
         const char *const serverInfo = mysql_get_server_info(this->connection);
-        const char *versionComment = NULL;
+        String *versionComment = NULL;
 
         if (mysql_query(this->connection, "SELECT @@version_comment") == 0)
         {
@@ -272,20 +274,13 @@ mysqlClientOpen(MysqlClient *const this)
                 MYSQL_ROW row = mysql_fetch_row(res);
 
                 if (row != NULL && row[0] != NULL)
-                    versionComment = row[0];
+                    versionComment = strNewZ(row[0]);
 
-                this->pub.vendor = mysqlClientDetectVendor(serverInfo, versionComment);
                 mysql_free_result(res);
             }
-            else
-            {
-                this->pub.vendor = mysqlClientDetectVendor(serverInfo, NULL);
-            }
         }
-        else
-        {
-            this->pub.vendor = mysqlClientDetectVendor(serverInfo, NULL);
-        }
+
+        this->pub.vendor = mysqlClientDetectVendor(serverInfo, versionComment != NULL ? strZ(versionComment) : NULL);
     }
     MEM_CONTEXT_TEMP_END();
 
