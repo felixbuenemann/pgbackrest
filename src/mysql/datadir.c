@@ -437,11 +437,12 @@ mysqlDataDirInfoToLog(const MysqlDataDirInfo *const this, StringStatic *const de
 
     strStcFmt(
         debugLog,
-        "{vendor: %u, versionNum: %u, exact: %s, pageSize: %u, redoLayout: %u, engines:[innodb=%s,myisam=%s,aria=%s,myrocks=%s,toku=%s]}",
+        "{vendor: %u, versionNum: %u, exact: %s, pageSize: %u, redoLayout: %u,"
+        " engines:[innodb=%s,myisam=%s,isam=%s,aria=%s,myrocks=%s,toku=%s]}",
         (unsigned int)this->vendor, this->versionNum, this->versionExact ? "true" : "false",
         (unsigned int)this->pageSize, (unsigned int)this->redoLayout,
-        this->hasInnodb ? "y" : "n", this->hasMyisam ? "y" : "n", this->hasAria ? "y" : "n",
-        this->hasMyrocks ? "y" : "n", this->hasTokudb ? "y" : "n");
+        this->hasInnodb ? "y" : "n", this->hasMyisam ? "y" : "n", this->hasIsam ? "y" : "n",
+        this->hasAria ? "y" : "n", this->hasMyrocks ? "y" : "n", this->hasTokudb ? "y" : "n");
 }
 
 /***********************************************************************************************************************************
