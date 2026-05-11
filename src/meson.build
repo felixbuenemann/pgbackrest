@@ -451,3 +451,11 @@ executable(
     files('../test/src/standalone/hotBackupIntegrationTest.c', '../test/src/standalone/harnessMysql.c'),
     help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
 )
+
+# End-to-end test against a real MariaDB instance — driven by test/e2e/run-mariadb.sh which boots a private mariadbd on a /tmp
+# socket. Does NOT link harnessMysql — uses the real libmariadb wire protocol.
+executable(
+    'standalone-mariadb-e2e-test',
+    src_common, src_mybackrest, files('../test/src/standalone/mariadbE2eTest.c'),
+    help_auto_c_inc, interface_auto_c_inc, dependencies: standalone_test_deps, install: false,
+)

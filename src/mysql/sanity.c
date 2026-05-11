@@ -115,20 +115,24 @@ mysqlServerSanityCheck(MysqlClient *const client)
         if (!result.serverIdSet)
             result.errorCount++;
 
-        // Capture identifying info for log messages — use SELECT @@server_uuid (more reliable than SHOW VARIABLES on hashed-name
-        // variables in some MariaDB versions)
-        Pack *const uuidPack = mysqlClientQuery(client, STRDEF("SELECT @@server_uuid"), mysqlClientQueryResultColumn);
-
-        if (uuidPack != NULL)
+        // Capture identifying info for log messages. @@server_uuid is MySQL-only — MariaDB has no equivalent (it gets its UUID
+        // from auto.cnf on disk, which the datadir inspector reads separately). Only query it on MySQL/Percona; for MariaDB
+        // leave result.serverUuid NULL here and rely on mysqlDataDirInspect to capture it later.
+        if (mysqlClientVendor(client) != mysqlVendorMariadb)
         {
-            PackRead *const uuidRead = pckReadNew(uuidPack);
-            String *const uuid = pckReadStrP(uuidRead);
+            Pack *const uuidPack = mysqlClientQuery(client, STRDEF("SELECT @@server_uuid"), mysqlClientQueryResultColumn);
 
-            MEM_CONTEXT_PRIOR_BEGIN()
+            if (uuidPack != NULL)
             {
-                result.serverUuid = uuid != NULL ? strDup(uuid) : NULL;
+                PackRead *const uuidRead = pckReadNew(uuidPack);
+                String *const uuid = pckReadStrP(uuidRead);
+
+                MEM_CONTEXT_PRIOR_BEGIN()
+                {
+                    result.serverUuid = uuid != NULL ? strDup(uuid) : NULL;
+                }
+                MEM_CONTEXT_PRIOR_END();
             }
-            MEM_CONTEXT_PRIOR_END();
         }
 
         // Capture binlog basename (path prefix) so the orchestrator knows where to look
