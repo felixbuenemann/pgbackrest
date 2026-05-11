@@ -2,3 +2,10 @@
 *~
 *.swp
 .DS_Store
+
+# Editor / LSP scratch
+.cache/
+
+# Local builds
+/build/
+/build-*/

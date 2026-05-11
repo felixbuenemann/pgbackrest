@@ -122,9 +122,12 @@ main(void)
         expect("torn page rejected (trailer-LSN mismatch)", !tornResult);
         goodPage[mysqlPageSize16K - 1] ^= 0xFF;
 
-        // ---- Test 5: page-no caller mismatch ----
+        // ---- Test 5: page-no caller mismatch is IGNORED ----
+        // mysqld's own buf_page_is_corrupted doesn't check stored-FIL_PAGE_OFFSET vs file position because doublewrite
+        // buffer copies legitimately store a page-no pointing at the logical home, not the position in the file. We follow
+        // the same rule — pass the wrong pageNo, the validator still accepts the page.
         const bool wrongPageNo = mysqlPageChecksumValidate(goodPage, mysqlPageSize16K, mysqlPageChecksumCrc32, /*ask for*/99);
-        expect("wrong page-no rejected", !wrongPageNo);
+        expect("page-no caller mismatch is ignored (matches mysqld semantics)", wrongPageNo);
 
         // ---- Test 6: pageChecksumNone always accepts ----
         const bool noneResult = mysqlPageChecksumValidate(goodPage, mysqlPageSize16K, mysqlPageChecksumNone, 42);

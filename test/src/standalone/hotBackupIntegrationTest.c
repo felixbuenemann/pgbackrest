@@ -122,11 +122,12 @@ main(void)
             // 2. mysqlClientOpen issues SELECT @@version_comment after the handshake
             HRN_MYSQL_QUERY_ONE("SELECT @@version_comment", "MySQL Community Server - GPL"),
 
-            // 3. mysqlServerSanityCheck — each variable goes via "SHOW VARIABLES LIKE 'X'" returning (Variable_name, Value)
+            // 3. mysqlServerSanityCheck — each variable goes via "SHOW VARIABLES LIKE 'X'" returning (Variable_name, Value).
+            //    For MySQL/Percona we query @@gtid_mode; gtid_strict_mode isn't checked. (For MariaDB the sanity check
+            //    skips the gtid_mode lookup entirely since GTID is automatic when log_bin is ON.)
             HRN_MYSQL_QUERY_VAR("SHOW VARIABLES LIKE 'log_bin'",          "log_bin",          "ON"),
             HRN_MYSQL_QUERY_VAR("SHOW VARIABLES LIKE 'binlog_format'",    "binlog_format",    "ROW"),
             HRN_MYSQL_QUERY_VAR("SHOW VARIABLES LIKE 'gtid_mode'",        "gtid_mode",        "ON"),
-            HRN_MYSQL_QUERY_VAR("SHOW VARIABLES LIKE 'gtid_strict_mode'", "gtid_strict_mode", "OFF"),
             HRN_MYSQL_QUERY_VAR("SHOW VARIABLES LIKE 'server_id'",        "server_id",        "42"),
             HRN_MYSQL_QUERY_ONE("SELECT @@server_uuid",                   "8c0fd6f0-bf8f-11ee-9821-0242ac120002"),
             HRN_MYSQL_QUERY_ONE("SELECT @@log_bin_basename",              "/var/log/mysql/mysql-bin"),

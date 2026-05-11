@@ -41,7 +41,13 @@ struct TableSpaceIter
 /***********************************************************************************************************************************
 Predicate: is this a top-level tablespace file we should back up?
 
-Matches: ibdata*, mysql.ibd, undo_*.ibu
+Matches:
+  - ibdata*                  — InnoDB system tablespace (MySQL/Percona/MariaDB)
+  - mysql.ibd                — MySQL/Percona 8.0+ data dictionary tablespace
+  - undo_NNN.ibu             — MySQL/Percona 8.0+ undo tablespaces (note the underscore + .ibu extension)
+  - undoNNN                  — MariaDB undo tablespaces (no underscore, no extension; same FSP header layout though)
+                               See mariadb-server srv_undo_dir + srv_undo_tablespaces_open logic; default names are
+                               undo001 / undo002 / undo003.
 ***********************************************************************************************************************************/
 static bool
 tableSpaceIsTopLevelMatch(const String *const name)
@@ -54,6 +60,23 @@ tableSpaceIsTopLevelMatch(const String *const name)
 
     if (strBeginsWithZ(name, "undo_") && strEndsWithZ(name, ".ibu"))
         return true;
+
+    // MariaDB-style "undoNNN" (no underscore, no extension). Match a fixed prefix + 3+ digits, no extension.
+    if (strBeginsWithZ(name, "undo") && strSize(name) >= 7)
+    {
+        const char *const after = strZ(name) + 4;                       // points past "undo"
+        bool allDigits = true;
+        for (const char *c = after; *c != '\0'; c++)
+        {
+            if (*c < '0' || *c > '9')
+            {
+                allDigits = false;
+                break;
+            }
+        }
+        if (allDigits)
+            return true;
+    }
 
     return false;
 }

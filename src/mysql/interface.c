@@ -236,6 +236,12 @@ mysqlPageIsValidatable(const unsigned char *const page)
     if (t == FIL_PAGE_TYPE_ENCRYPTED)
         return false;
 
+    // MariaDB full_crc32 "compressed" page marker: bit 15 of FIL_PAGE_TYPE signals an FCRC32-mode compressed page (size of
+    // valid data is the LOW byte of the type field, in bytes). The whole-page CRC32 doesn't apply to these — skip. Constant
+    // from mariadb-server storage/innobase/include/fil0fil.h: FIL_PAGE_COMPRESS_FCRC32_MARKER = 15.
+    if (t & (1U << 15))
+        return false;
+
     return true;
 }
 
@@ -570,16 +576,24 @@ mysqlPageChecksumValidate(
         FUNCTION_TEST_RETURN(BOOL, true);
     }
 
-    // The trailer's LSN low half should match FIL_PAGE_LSN's low half — that's a torn-page detector. If they don't match, the
-    // page is torn and recovery (not us) will deal with it; we report invalid here so the upstream filter can re-read the page.
-    const size_t trailerOffset = (size_t)pageSize - FIL_PAGE_TRAILER_SIZE;
+    // Torn-page detector: the trailer-LSN-low-half should match FIL_PAGE_LSN's low half. The trailer layout differs by algo:
+    //   - Legacy InnoDB (CRC32, StrictCRC32, "innodb" hash, None): last 8 bytes are { old-checksum(4) | END_LSN_OLD_CHKSUM(4) },
+    //     so the LSN low half sits at pageSize-4. Reference: FIL_PAGE_END_LSN_OLD_CHKSUM in mysql-server fil0types.h.
+    //   - MariaDB full_crc32: last 8 bytes are { FCRC32_END_LSN(4) | FCRC32_CHECKSUM(4) }. The LSN low half is at
+    //     pageSize-8 (FIL_PAGE_FCRC32_END_LSN = 8 in mariadb fil0fil.h). Reference: buf_page_is_corrupted in
+    //     mariadb-server storage/innobase/buf/buf0buf.cc around the FIL_PAGE_FCRC32_END_LSN comparison.
+    // Note: this MUST run after picking the algorithm; using the legacy offset on a full_crc32 page would compare against the
+    // CRC bytes and report bogus torn-page failures (the symptom that surfaced first on MariaDB 11.4 in the Docker e2e).
+    const size_t trailerLsnOffset = (algo == mysqlPageChecksumFullCrc32) ? ((size_t)pageSize - 8) : ((size_t)pageSize - 4);
 
-    if (mysqlReadU32Be(page + FIL_PAGE_LSN + 4) != mysqlReadU32Be(page + trailerOffset + 4))
+    if (mysqlReadU32Be(page + FIL_PAGE_LSN + 4) != mysqlReadU32Be(page + trailerLsnOffset))
         FUNCTION_TEST_RETURN(BOOL, false);
 
-    // Also check the FIL_PAGE_OFFSET matches the caller's expectation
-    if (mysqlReadU32Be(page + FIL_PAGE_OFFSET) != pageNo)
-        FUNCTION_TEST_RETURN(BOOL, false);
+    // pageNo parameter is unused: doublewrite-buffer copies and similar "logically-elsewhere" pages legitimately store a
+    // FIL_PAGE_OFFSET that doesn't match their byte position in the file (the stored value identifies the page's logical
+    // home for crash recovery). Neither buf_page_is_corrupted nor buf_page_full_crc32_is_corrupted in mysql-server /
+    // mariadb-server checks position-vs-stored-page-no — they rely on CRC + torn-page-LSN. We do the same.
+    (void)pageNo;
 
     switch (algo)
     {

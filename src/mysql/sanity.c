@@ -96,13 +96,21 @@ mysqlServerSanityCheck(MysqlClient *const client)
         if (!result.binlogFormatRow)
             result.errorCount++;
 
-        // GTID detection — name differs by vendor
-        const String *const gtidMode = mysqlSanityReadVariable(client, "gtid_mode");                        // MySQL
-        const String *const gtidStrict = mysqlSanityReadVariable(client, "gtid_strict_mode");               // MariaDB
-
-        result.gtidEnabled =
-            (gtidMode != NULL && strEqZ(gtidMode, "ON")) ||
-            (gtidStrict != NULL && (strEqZ(gtidStrict, "ON") || strEqZ(gtidStrict, "1")));
+        // GTID detection — semantics differ by vendor:
+        //   - MySQL/Percona: @@gtid_mode is the toggle. Must be ON for our PITR story to work.
+        //   - MariaDB: GTID is automatic whenever log_bin is ON; there is no enable/disable toggle (gtid_strict_mode is a
+        //     strictness flag, not an enable flag, and defaults to OFF). When log_bin is ON, every transaction gets a
+        //     domain-server-seq GTID automatically. So for MariaDB the GTID check just confirms log_bin is on (already
+        //     verified above) — we report gtidEnabled=true unconditionally when the vendor is MariaDB and log_bin is on.
+        if (mysqlClientVendor(client) == mysqlVendorMariadb)
+        {
+            result.gtidEnabled = result.logBin;
+        }
+        else
+        {
+            const String *const gtidMode = mysqlSanityReadVariable(client, "gtid_mode");
+            result.gtidEnabled = gtidMode != NULL && strEqZ(gtidMode, "ON");
+        }
 
         if (!result.gtidEnabled)
             result.errorCount++;

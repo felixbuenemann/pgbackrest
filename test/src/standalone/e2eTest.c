@@ -1,15 +1,17 @@
 /***********************************************************************************************************************************
-End-to-End test against a real MariaDB instance.
+End-to-End test against a real MySQL/MariaDB/Percona instance.
 
-Driven by test/e2e/run-mariadb.sh which boots a private mariadbd on a /tmp socket. The test connects to it via the real
-MysqlClient (no harnessMysql shim here — this is the integration layer that catches what the shim can't).
+Driven by:
+  - test/e2e/run-mysql.sh   — apt-installed local MySQL on a /tmp socket (single flavor / version, host-only)
+  - test/e2e/run-docker.sh  — containerized MySQL / MariaDB / Percona via TCP — multi-flavor matrix
 
-Environment variables (set by run-mariadb.sh):
-  MYBACKREST_E2E_SOCKET   — Unix socket of the running mariadbd
-  MYBACKREST_E2E_DATADIR  — Source datadir to back up
-  MYBACKREST_E2E_BACKUP   — Empty destination directory
-  MYBACKREST_E2E_USER     — Backup user (has RELOAD/LOCK TABLES/REPLICATION CLIENT etc.)
-  MYBACKREST_E2E_PASS     — Backup user password
+The test binary picks its transport from env vars:
+  MYBACKREST_E2E_SOCKET            — Unix socket path (host-only mode), OR
+  MYBACKREST_E2E_HOST + _PORT      — TCP (Docker mode)
+  MYBACKREST_E2E_DATADIR           — Source datadir to back up (host path; for Docker this is the bind-mount target)
+  MYBACKREST_E2E_BACKUP            — Empty destination directory
+  MYBACKREST_E2E_USER              — Backup user (has RELOAD/LOCK TABLES/REPLICATION CLIENT etc.)
+  MYBACKREST_E2E_PASS              — Backup user password
 
 Verifies:
   - mysqlHotBackup runs end-to-end against a live MariaDB server
@@ -78,7 +80,19 @@ main(void)
 
     logInit(logLevelWarn, logLevelError, logLevelOff, false, 0, 1, false);
 
-    const char *const socketPath = mustGetEnv("MYBACKREST_E2E_SOCKET");
+    // Transport: prefer TCP when MYBACKREST_E2E_HOST is set (Docker harness), else require socket path (host-local harness).
+    const char *const socketPath = getenv("MYBACKREST_E2E_SOCKET");
+    const char *const hostZ = getenv("MYBACKREST_E2E_HOST");
+    const char *const portZ = getenv("MYBACKREST_E2E_PORT");
+
+    if ((socketPath == NULL || socketPath[0] == '\0') && (hostZ == NULL || hostZ[0] == '\0'))
+    {
+        fprintf(stderr, "must set MYBACKREST_E2E_SOCKET or MYBACKREST_E2E_HOST (+ MYBACKREST_E2E_PORT)\n");
+        exit(2);
+    }
+
+    const unsigned int port = (portZ != NULL && portZ[0] != '\0') ? (unsigned int)atoi(portZ) : 0;
+
     const char *const dataDirZ = mustGetEnv("MYBACKREST_E2E_DATADIR");
     const char *const backupDirZ = mustGetEnv("MYBACKREST_E2E_BACKUP");
     const char *const userZ = mustGetEnv("MYBACKREST_E2E_USER");
@@ -88,10 +102,16 @@ main(void)
 
     TRY_BEGIN()
     {
-        printf("e2e test (live server at %s):\n", socketPath);
+        if (hostZ != NULL && hostZ[0] != '\0')
+            printf("e2e test (live server at %s:%u):\n", hostZ, port);
+        else
+            printf("e2e test (live server at %s):\n", socketPath);
 
         MysqlClient *const client = mysqlClientNew(
-            /*host*/ NULL, /*port*/ 0, STR(socketPath), /*database*/ NULL,
+            /*host*/ (hostZ != NULL && hostZ[0] != '\0') ? STR(hostZ) : NULL,
+            /*port*/ port,
+            /*socket*/ (socketPath != NULL && socketPath[0] != '\0') ? STR(socketPath) : NULL,
+            /*database*/ NULL,
             STR(userZ), STR(passZ), /*timeout*/ 10000);
 
         mysqlClientOpen(client);

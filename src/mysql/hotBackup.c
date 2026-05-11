@@ -85,9 +85,24 @@ hotBackupCaptureBinlog(MysqlClient *const client, MysqlBackupBinlog *const binlo
 
     MEM_CONTEXT_TEMP_BEGIN()
     {
-        // SHOW MASTER STATUS returns AT MOST one row. We tolerate zero rows by using mysqlClientQueryResultAny instead of Row
-        // so the caller doesn't throw — log_bin=OFF servers return no row, and that case is already caught by sanity check.
-        Pack *const pack = mysqlClientQuery(client, STRDEF("SHOW MASTER STATUS"), mysqlClientQueryResultAny);
+        // MySQL/Percona renamed the binlog-status command in two steps (verified against mysql-server git history):
+        //   - 8.2.0 (commit cf1bf08c360, WL#14190, Aug 2023): SHOW BINARY LOG STATUS added as a synonym for SHOW MASTER
+        //     STATUS — BOTH names work
+        //   - 8.4.0 (commit 7cabca9bfb8, WL#15831, Feb 2024): SHOW MASTER STATUS parser keywords removed — ONLY the new
+        //     name works
+        // MariaDB never renamed: only SHOW MASTER STATUS works (verified — git log -G "SHOW BINARY LOG STATUS" returns
+        // no hits in mariadb-server). So we use the new name only when the server REQUIRES it — version >= 80400.
+        const bool useBinaryLogStatus =
+            (mysqlClientVendor(client) == mysqlVendorMysql ||
+             mysqlClientVendor(client) == mysqlVendorPercona) &&
+            mysqlClientServerVersionNum(client) >= 80400;
+
+        const String *const statusSql = useBinaryLogStatus
+            ? STRDEF("SHOW BINARY LOG STATUS") : STRDEF("SHOW MASTER STATUS");
+
+        // The result returns AT MOST one row. We tolerate zero rows by using mysqlClientQueryResultAny instead of Row so the
+        // caller doesn't throw — log_bin=OFF servers return no row, and that case is already caught by the sanity check.
+        Pack *const pack = mysqlClientQuery(client, statusSql, mysqlClientQueryResultAny);
 
         if (pack != NULL)
         {
